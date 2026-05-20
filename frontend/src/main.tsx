@@ -2015,11 +2015,11 @@ function SecurityWorkspace({
             />
           </label>
           <div className="quick-filters">
-            <button type="button" onClick={() => applyQuickFilter("blocked")}>Blocked Traffic</button>
-            <button type="button" onClick={() => applyQuickFilter("passed")}>Passed Traffic</button>
+            <button type="button" className="quick-filter-block" onClick={() => applyQuickFilter("blocked")}>Blocked</button>
+            <button type="button" className="quick-filter-pass" onClick={() => applyQuickFilter("passed")}>Passed</button>
             <button type="button" onClick={() => applyQuickFilter("wan")}>WAN</button>
             <button type="button" onClick={() => applyQuickFilter("hour")}>Last Hour</button>
-            <button type="button" onClick={() => applyQuickFilter("day")}>Last 24 Hours</button>
+            <button type="button" onClick={() => applyQuickFilter("day")}>Last 24h</button>
           </div>
           <SecurityFilterInput label="Source IP" value={filters.src_ip} onChange={(value) => updateFilter("src_ip", value)} />
           <SecurityFilterInput label="Destination IP" value={filters.dst_ip} onChange={(value) => updateFilter("dst_ip", value)} />

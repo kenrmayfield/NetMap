@@ -12,6 +12,7 @@ from app.api.deps import (
     require_super_admin,
 )
 from app.core.validation import normalize_ip, validate_port, validate_syslog_field
+from app.db.firewall_session import get_firewall_db
 from app.db.session import get_db
 from app.models.user import User
 from app.services.audit.service import write_audit
@@ -47,6 +48,7 @@ def export_inventory(
 def export_firewall_events(
     current_user: Annotated[User, Depends(require_firewall_export)],
     db: Annotated[Session, Depends(get_db)],
+    firewall_db: Annotated[Session, Depends(get_firewall_db)],
     format: Literal["csv", "json"] = "csv",
     limit: Annotated[int, Query(ge=1, le=10000)] = 5000,
     q: Annotated[str | None, Query(max_length=120)] = None,
@@ -81,7 +83,7 @@ def export_firewall_events(
     parsed_start = parse_optional_datetime(start_time)
     parsed_end = parse_optional_datetime(end_time)
     media_type, filename, payload, exported_rows = build_firewall_export(
-        db,
+        firewall_db,
         format,
         q=q,
         src_ip=src_ip,
@@ -109,8 +111,9 @@ def export_firewall_events(
 def export_network_report(
     current_user: Annotated[User, Depends(require_report_export)],
     db: Annotated[Session, Depends(get_db)],
+    firewall_db: Annotated[Session, Depends(get_firewall_db)],
 ) -> Response:
-    payload = build_network_report_pdf(db)
+    payload = build_network_report_pdf(db, firewall_db)
     write_audit(
         db,
         action="export.report_pdf",

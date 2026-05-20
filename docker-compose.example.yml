@@ -63,6 +63,4 @@ services:
       - ALL
     cap_add:
       - NET_RAW
-    security_opt:
-      - no-new-privileges:true
     restart: unless-stopped

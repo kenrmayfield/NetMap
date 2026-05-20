@@ -1,7 +1,15 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _read_version_file() -> str:
+    try:
+        return Path("/app/VERSION").read_text().strip()
+    except OSError:
+        return "dev"
 
 
 class Settings(BaseSettings):
@@ -86,7 +94,7 @@ class Settings(BaseSettings):
     notification_block_private_targets: bool = Field(default=False, alias="NOTIFICATION_BLOCK_PRIVATE_TARGETS")
     app_url: str = Field(default="", alias="APP_URL")
     log_level: str = Field(default="info", alias="LOG_LEVEL")
-    app_version: str = Field(default="dev", alias="APP_VERSION")
+    app_version: str = Field(default_factory=_read_version_file, alias="APP_VERSION")
 
     model_config = SettingsConfigDict(
         env_file=(".env", "/etc/netmap/netmap.env"),

@@ -11,7 +11,7 @@ from app.api.deps import require_security_view
 from app.core.config import settings
 from app.core.security import decode_token
 from app.core.validation import normalize_ip, validate_port, validate_syslog_field
-from app.db.session import SessionLocal, get_db
+from app.db.firewall_session import FirewallSessionLocal as SessionLocal, get_firewall_db
 from app.models.firewall_event import FirewallEvent
 from app.models.user import User, UserRole
 from app.schemas.firewall_event import FirewallEventList, FirewallEventRead, SyslogStatus
@@ -59,7 +59,7 @@ def syslog_status(_current_user: Annotated[User, Depends(require_security_view)]
 @router.get("/events", response_model=FirewallEventList)
 def list_firewall_events(
     _current_user: Annotated[User, Depends(require_security_view)],
-    db: Annotated[Session, Depends(get_db)],
+    db: Annotated[Session, Depends(get_firewall_db)],
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     q: Annotated[str | None, Query(max_length=120)] = None,

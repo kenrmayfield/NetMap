@@ -28,7 +28,7 @@ def correlation_window_start(window_hours: int) -> datetime:
 
 
 def build_device_event_counts(
-    db: Session,
+    firewall_db: Session,
     devices: list[Device],
     *,
     window_start: datetime,
@@ -69,7 +69,7 @@ def build_device_event_counts(
         .order_by(FirewallEvent.received_at.desc())
     )
 
-    for event_id, received_at, src_ip, dst_ip, action in db.execute(query):
+    for event_id, received_at, src_ip, dst_ip, action in firewall_db.execute(query):
         _ = event_id
         matched_ids: set[int] = set()
         if src_ip:
@@ -105,7 +105,7 @@ def build_device_event_counts(
 
 
 def list_recent_device_events(
-    db: Session,
+    firewall_db: Session,
     *,
     device: Device,
     window_start: datetime,
@@ -122,7 +122,7 @@ def list_recent_device_events(
         .order_by(FirewallEvent.received_at.desc(), FirewallEvent.id.desc())
         .limit(limit)
     )
-    events = db.scalars(query).all()
+    events = firewall_db.scalars(query).all()
 
     return [
         CorrelatedFirewallEvent(

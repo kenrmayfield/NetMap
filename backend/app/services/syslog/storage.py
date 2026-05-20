@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, func, select
 
 from app.core.config import settings
-from app.db.session import SessionLocal
+from app.db.firewall_session import FirewallSessionLocal as SessionLocal
 from app.models.firewall_event import FirewallEvent
 from app.services.syslog.parser import ParsedFirewallEvent, parse_syslog_line
 from app.websocket.firewall_events import firewall_event_broadcaster
@@ -30,6 +30,8 @@ _retention_status_lock = threading.Lock()
 
 def store_syslog_line(raw_line: bytes | str, sender_host: str | None = None) -> int:
     parsed = parse_syslog_line(raw_line, sender_host)
+    if parsed.src_ip is None and parsed.dst_ip is None and parsed.action is None and parsed.protocol is None:
+        return 0
     event = event_from_parsed(parsed)
     with SessionLocal() as db:
         db.add(event)

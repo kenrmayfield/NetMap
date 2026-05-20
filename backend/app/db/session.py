@@ -1,8 +1,9 @@
 from collections.abc import Generator
 from datetime import datetime, timezone
 import logging
+import sqlite3
 
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -18,6 +19,16 @@ if settings.database_url == "sqlite://":
     engine_kwargs["poolclass"] = StaticPool
 
 engine = create_engine(settings.database_url, **engine_kwargs)
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, _rec):
+    if isinstance(dbapi_conn, sqlite3.Connection):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.close()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -34,7 +45,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.models import alert_rule, auth_session, audit_log, device, dhcp_lease, discovery, firewall_event, monitor_history, password_reset_token, port_target, relationship, site, subnet, system_setting, topology_group, topology_layout, user  # noqa: F401
+    from app.models import alert_rule, auth_session, audit_log, device, dhcp_lease, discovery, monitor_history, password_reset_token, port_target, relationship, site, subnet, system_setting, topology_group, topology_layout, user  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_migrations_table()
@@ -81,7 +92,6 @@ def apply_sqlite_schema_updates() -> None:
 
     with engine.begin() as conn:
         _run_migration(conn, inspector, "0001_devices_columns", _migrate_devices_columns)
-        _run_migration(conn, inspector, "0002_firewall_event_indexes", _migrate_firewall_indexes)
         _run_migration(conn, inspector, "0003_topology_groups_columns", _migrate_topology_group_columns)
         _run_migration(conn, inspector, "0004_topology_group_entity_backfill", _migrate_topology_group_backfill)
         _run_migration(conn, inspector, "0005_system_settings", _migrate_system_settings)
@@ -135,21 +145,6 @@ def _migrate_devices_columns(conn, inspector) -> None:
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(text("UPDATE devices SET updated_at = :now"), {"now": now})
 
-
-def _migrate_firewall_indexes(conn, inspector) -> None:
-    if "firewall_events" not in inspector.get_table_names():
-        return
-    index_sql = [
-        "CREATE INDEX IF NOT EXISTS ix_firewall_events_received_at_id ON firewall_events (received_at, id)",
-        "CREATE INDEX IF NOT EXISTS ix_firewall_events_event_time_id ON firewall_events (event_time, id)",
-        "CREATE INDEX IF NOT EXISTS ix_firewall_events_src_ip_received_at ON firewall_events (src_ip, received_at)",
-        "CREATE INDEX IF NOT EXISTS ix_firewall_events_dst_ip_received_at ON firewall_events (dst_ip, received_at)",
-        "CREATE INDEX IF NOT EXISTS ix_firewall_events_action_received_at ON firewall_events (action, received_at)",
-        "CREATE INDEX IF NOT EXISTS ix_firewall_events_interface_received_at ON firewall_events (interface, received_at)",
-        "CREATE INDEX IF NOT EXISTS ix_firewall_events_protocol_received_at ON firewall_events (protocol, received_at)",
-    ]
-    for sql in index_sql:
-        conn.execute(text(sql))
 
 
 def _migrate_topology_group_columns(conn, inspector) -> None:

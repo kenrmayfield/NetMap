@@ -122,7 +122,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         httponly=False,
         secure=secure,
         samesite="strict",
-        path="/api/",
+        path="/",
         max_age=settings.refresh_token_days * 86400,
     )
 

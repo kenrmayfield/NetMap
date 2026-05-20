@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_security_view, require_topology_write
+from app.db.firewall_session import get_firewall_db
 from app.db.session import get_db
 from app.models.device import Device
 from app.models.relationship import DeviceRelationship
@@ -483,6 +484,7 @@ def list_device_security_events(
     device_id: int,
     _current_user: Annotated[User, Depends(require_security_view)],
     db: Annotated[Session, Depends(get_db)],
+    firewall_db: Annotated[Session, Depends(get_firewall_db)],
     window_hours: int = 24,
     limit: int = 25,
 ) -> DeviceSecurityEventSummary:
@@ -495,12 +497,12 @@ def list_device_security_events(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
 
     events = list_recent_device_events(
-        db,
+        firewall_db,
         device=device,
         window_start=window_start,
         limit=bounded_limit,
     )
-    event_counts = build_device_event_counts(db, [device], window_start=window_start)[device.id]
+    event_counts = build_device_event_counts(firewall_db, [device], window_start=window_start)[device.id]
     return DeviceSecurityEventSummary(
         device_id=device.id,
         window_hours=bounded_window,
@@ -516,13 +518,14 @@ def list_device_security_events(
 def list_device_event_counts(
     _current_user: Annotated[User, Depends(require_security_view)],
     db: Annotated[Session, Depends(get_db)],
+    firewall_db: Annotated[Session, Depends(get_firewall_db)],
     window_hours: int = 24,
     with_events_only: bool = False,
 ) -> DeviceEventCountList:
     bounded_window = min(max(window_hours, 1), 24 * 7)
     window_start = correlation_window_start(bounded_window)
     devices = db.scalars(select(Device).order_by(Device.hostname, Device.ip_address)).all()
-    event_counts = build_device_event_counts(db, devices, window_start=window_start)
+    event_counts = build_device_event_counts(firewall_db, devices, window_start=window_start)
     rows = [event_counts[device.id] for device in devices]
     if with_events_only:
         rows = [row for row in rows if row.event_count > 0]
@@ -533,6 +536,7 @@ def list_device_event_counts(
 def list_top_affected_devices(
     _current_user: Annotated[User, Depends(require_security_view)],
     db: Annotated[Session, Depends(get_db)],
+    firewall_db: Annotated[Session, Depends(get_firewall_db)],
     window_hours: int = 24,
     limit: int = 10,
 ) -> DeviceEventCountList:
@@ -540,7 +544,7 @@ def list_top_affected_devices(
     bounded_limit = min(max(limit, 1), 50)
     window_start = correlation_window_start(bounded_window)
     devices = db.scalars(select(Device).order_by(Device.hostname, Device.ip_address)).all()
-    event_counts = build_device_event_counts(db, devices, window_start=window_start)
+    event_counts = build_device_event_counts(firewall_db, devices, window_start=window_start)
     rows = sorted(
         event_counts.values(),
         key=lambda row: (row.event_count, row.last_seen_event_time is not None, row.last_seen_event_time),

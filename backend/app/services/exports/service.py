@@ -61,7 +61,7 @@ def build_inventory_export(db: Session, export_format: str) -> tuple[str, str, b
 
 
 def build_firewall_export(
-    db: Session,
+    firewall_db: Session,
     export_format: str,
     *,
     q: str | None = None,
@@ -89,7 +89,7 @@ def build_firewall_export(
         start_time=start_time,
         end_time=end_time,
     )
-    events = db.scalars(
+    events = firewall_db.scalars(
         query.order_by(desc(FirewallEvent.received_at), desc(FirewallEvent.id)).limit(limit),
     ).all()
     rows = [serialize_firewall_event_export(event) for event in events]
@@ -122,17 +122,17 @@ def build_firewall_export(
     return "text/csv; charset=utf-8", f"netmap-firewall-events-{timestamp}.csv", payload, len(rows)
 
 
-def build_network_report_pdf(db: Session) -> bytes:
+def build_network_report_pdf(db: Session, firewall_db: Session) -> bytes:
     devices = db.scalars(select(Device).order_by(Device.hostname, Device.ip_address)).all()
     last_24_hours = datetime.now(timezone.utc) - timedelta(hours=24)
     total_events = int(
-        db.scalar(
+        firewall_db.scalar(
             select(func.count()).select_from(FirewallEvent).where(FirewallEvent.received_at >= last_24_hours),
         )
         or 0
     )
     blocked_events = int(
-        db.scalar(
+        firewall_db.scalar(
             select(func.count())
             .select_from(FirewallEvent)
             .where(
@@ -143,7 +143,7 @@ def build_network_report_pdf(db: Session) -> bytes:
         or 0
     )
     passed_events = int(
-        db.scalar(
+        firewall_db.scalar(
             select(func.count())
             .select_from(FirewallEvent)
             .where(
@@ -154,8 +154,8 @@ def build_network_report_pdf(db: Session) -> bytes:
         or 0
     )
 
-    blocked_sources = top_blocked_dimension(db, FirewallEvent.src_ip)
-    blocked_destinations = top_blocked_dimension(db, FirewallEvent.dst_ip)
+    blocked_sources = top_blocked_dimension(firewall_db, FirewallEvent.src_ip)
+    blocked_destinations = top_blocked_dimension(firewall_db, FirewallEvent.dst_ip)
     subnet_counts = summarize_subnets(devices)
 
     buffer = io.BytesIO()
@@ -241,7 +241,7 @@ _SIG_SUFFIX = b"\n"
 _SIG_TRAILER_LEN = len(_SIG_PREFIX) + 64 + len(_SIG_SUFFIX)
 
 _EXPECTED_TABLES = frozenset({
-    "users", "system_settings", "devices", "links", "firewall_events",
+    "users", "system_settings", "devices", "links",
 })
 
 

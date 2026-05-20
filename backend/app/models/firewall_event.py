@@ -3,10 +3,10 @@ from datetime import datetime, timezone
 from sqlalchemy import DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.session import Base
+from app.db.firewall_session import FirewallBase
 
 
-class FirewallEvent(Base):
+class FirewallEvent(FirewallBase):
     __tablename__ = "firewall_events"
     __table_args__ = (
         Index("ix_firewall_events_received_at_id", "received_at", "id"),

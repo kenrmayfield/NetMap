@@ -25,19 +25,21 @@ def _fetch_latest_version() -> str | None:
     if _cached_latest is not None and (now - _cached_at) < _CACHE_TTL:
         return _cached_latest
     try:
-        url = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
+        import json
+        import re
+        url = f"https://api.github.com/repos/{_GITHUB_REPO}/tags?per_page=10"
         req = urllib.request.Request(url, headers={"User-Agent": f"netmap/{settings.app_version}"})
         with urllib.request.urlopen(req, timeout=5) as resp:
-            import json
-            data = json.loads(resp.read())
-            tag = data.get("tag_name", "")
+            tags = json.loads(resp.read())
+        for entry in tags:
+            tag = entry.get("name", "")
             version = tag.lstrip("v")
-            if version:
+            if re.fullmatch(r"\d+\.\d+\.\d+", version):
                 _cached_latest = version
                 _cached_at = now
                 return version
     except Exception:
-        logger.debug("Could not fetch latest release from GitHub", exc_info=True)
+        logger.debug("Could not fetch latest tag from GitHub", exc_info=True)
     return None
 
 
@@ -50,5 +52,5 @@ def get_version() -> dict:
         "current": current,
         "latest": latest,
         "up_to_date": up_to_date,
-        "release_url": f"https://github.com/{_GITHUB_REPO}/releases/latest",
+        "release_url": f"https://github.com/{_GITHUB_REPO}/releases",
     }

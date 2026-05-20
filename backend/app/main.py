@@ -8,6 +8,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.startup import validate_runtime_configuration
+from app.db.firewall_session import init_firewall_db
 from app.db.session import SessionLocal, init_db
 from app.middleware.csrf import CsrfProtectionMiddleware
 from app.middleware.security import SecurityHeadersMiddleware
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
         from app.services.rbac.permissions import load_from_db
         validate_runtime_configuration()
         init_db()
+        init_firewall_db()
         cleanup_expired_events()
         _cleanup_stuck_scans()
         with SessionLocal() as db:
