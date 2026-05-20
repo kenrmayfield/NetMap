@@ -109,6 +109,8 @@ def run_nmap_scan(target: DiscoveryTarget, scan_type: str) -> list[DiscoveryHost
         command.extend(
             [
                 "-sn",
+                "-PR",
+                "-PE",
                 "-T3",
                 "--host-timeout",
                 f"{ping_host_timeout_seconds(target)}s",

@@ -31,7 +31,7 @@ RUN apt-get update \
        tini \
        traceroute \
   && rm -rf /var/lib/apt/lists/* \
-  && setcap cap_net_raw+eip /usr/bin/nmap
+  && setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 
 RUN addgroup --system netmap && adduser --system --ingroup netmap netmap
 
