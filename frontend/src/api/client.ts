@@ -577,6 +577,13 @@ export type VlanSuggestion = {
   already_imported: boolean;
 };
 
+export type VersionInfo = {
+  current: string;
+  latest: string | null;
+  up_to_date: boolean;
+  release_url: string;
+};
+
 type RequestOptions = RequestInit & {
   token?: string | null;
 };
@@ -1144,4 +1151,5 @@ export const api = {
     request<{ imported: number }>("/api/v1/ipam/subnets/import-from-vlans", {
       method: "POST", token, body: JSON.stringify({ group_ids: groupIds }),
     }),
+  getVersion: (token: string) => request<VersionInfo>("/api/v1/system/version", { token }),
 };

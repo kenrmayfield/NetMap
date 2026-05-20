@@ -52,6 +52,7 @@ RUN pip install --no-cache-dir --upgrade pip \
        "reportlab~=4.4"
 
 COPY backend/app ./app
+COPY VERSION /app/VERSION
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 COPY docker/aio-nginx.conf.template /app/docker/aio-nginx.conf.template
 COPY docker/aio-entrypoint.sh /app/docker/aio-entrypoint.sh

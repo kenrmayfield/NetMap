@@ -61,6 +61,7 @@ import {
   VlanSuggestion,
   PermissionMeta,
   RolePermissions,
+  VersionInfo,
   api,
 } from "./api/client";
 import "./styles/global.css";
@@ -440,6 +441,7 @@ function App() {
   const [iconPackLoading, setIconPackLoading] = useState(true);
   const [activeIconPackId, setActiveIconPackId] = useState(() => window.localStorage.getItem(iconPackStorageKey) || builtInIconPack.id);
   const [iconPackError, setIconPackError] = useState<string | null>(null);
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const topologyRefreshRequestIdRef = useRef(0);
   const [resetToken, setResetToken] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -455,6 +457,11 @@ function App() {
   useEffect(() => {
     void api.adminPublicSettings().then(setAppSettings).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    void api.getVersion(accessToken).then(setVersionInfo).catch(() => {});
+  }, [accessToken]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -785,6 +792,7 @@ function App() {
           setCurrentRoute(route);
           window.scrollTo({ top: 0, behavior: "smooth" });
         }}
+        versionInfo={versionInfo}
       />
       <section className="workspace">
         {error && <div className="error-banner">{error}</div>}
@@ -832,6 +840,7 @@ function App() {
               setActiveIconPackId(builtInIconPack.id);
             }
           }}
+          versionInfo={versionInfo}
         />
       </section>
     </main>
@@ -849,6 +858,7 @@ function Sidebar({
   onToggleCollapse,
   theme,
   onNavigate,
+  versionInfo,
 }: {
   canAccessAdmin: boolean;
   canAccessExports: boolean;
@@ -860,6 +870,7 @@ function Sidebar({
   onToggleCollapse: () => void;
   theme: "light" | "dark";
   onNavigate: (route: AppRoute) => void;
+  versionInfo: VersionInfo | null;
 }) {
   return (
     <aside className={collapsed ? "sidebar sidebar--collapsed" : "sidebar"} aria-label="Primary navigation">
@@ -909,6 +920,20 @@ function Sidebar({
         <LogOut size={16} aria-hidden="true" />
         {!collapsed && "Sign out"}
       </button>
+      {versionInfo && (
+        <div className="sidebar-version" title={collapsed ? `v${versionInfo.current}` : undefined}>
+          {!collapsed && (
+            <span>
+              v{versionInfo.current}
+              {!versionInfo.up_to_date && versionInfo.latest && (
+                <a href={versionInfo.release_url} target="_blank" rel="noreferrer" className="sidebar-version-update">
+                  {" "}↑ v{versionInfo.latest}
+                </a>
+              )}
+            </span>
+          )}
+        </div>
+      )}
     </aside>
   );
 }
@@ -1227,6 +1252,7 @@ function DashboardView({
   onSelectIconPack,
   onAddLocalIconPack,
   onRemoveLocalIconPack,
+  versionInfo,
 }: {
   accessToken: string | null;
   currentRoute: AppRoute;
@@ -1246,6 +1272,7 @@ function DashboardView({
   onSelectIconPack: (packId: string) => void;
   onAddLocalIconPack: (pack: IconPack) => void;
   onRemoveLocalIconPack: (packId: string) => void;
+  versionInfo: VersionInfo | null;
 }) {
   const canWrite = user.role === "SuperAdmin" || user.role === "NetworkAdmin";
   const canViewSecurity = user.role === "SuperAdmin" || user.role === "NetworkAdmin" || user.role === "SecurityAnalyst";
@@ -1329,6 +1356,7 @@ function DashboardView({
           onSelectIconPack={onSelectIconPack}
           onAddLocalIconPack={onAddLocalIconPack}
           onRemoveLocalIconPack={onRemoveLocalIconPack}
+          versionInfo={versionInfo}
         />
       )}
       {currentRoute === "/profile" && accessToken && (
@@ -1701,14 +1729,6 @@ function OverviewWorkspace({
                     <span className="dash-panel-meta" style={{ minWidth: 60, textAlign: "right" }}>
                       {d.avg_rtt_24h != null ? `${d.avg_rtt_24h.toFixed(1)} ms` : "—"}
                     </span>
-                    <button
-                      type="button"
-                      className="fav-btn fav-btn--active"
-                      title="Remove from favourites"
-                      onClick={() => void toggleFav(d.device_id)}
-                    >
-                      <Star size={13} fill="currentColor" />
-                    </button>
                   </div>
                 ))}
               </div>
@@ -3451,6 +3471,7 @@ function AdminWorkspace({
   onSelectIconPack,
   onAddLocalIconPack,
   onRemoveLocalIconPack,
+  versionInfo,
 }: {
   accessToken: string;
   graph: TopologyGraph;
@@ -3463,6 +3484,7 @@ function AdminWorkspace({
   onSelectIconPack: (packId: string) => void;
   onAddLocalIconPack: (pack: IconPack) => void;
   onRemoveLocalIconPack: (packId: string) => void;
+  versionInfo: VersionInfo | null;
 }) {
   const [activeTab, setActiveTab] = useState<"system" | "users" | "security" | "notifications" | "alerts" | "groups">("system");
   const [users, setUsers] = useState<User[]>([]);
@@ -4111,6 +4133,29 @@ function AdminWorkspace({
               </section>
             </div>
             <div className="system-tab-col">
+              {versionInfo && (
+                <section className="panel admin-panel">
+                  <h2>Version</h2>
+                  <dl className="admin-config-grid">
+                    <dt>Installed</dt>
+                    <dd>v{versionInfo.current}</dd>
+                    <dt>Latest</dt>
+                    <dd>
+                      {versionInfo.latest ? (
+                        versionInfo.up_to_date ? (
+                          <span style={{ color: "var(--dash-green)" }}>v{versionInfo.latest} — up to date</span>
+                        ) : (
+                          <a href={versionInfo.release_url} target="_blank" rel="noreferrer" style={{ color: "var(--dash-yellow)" }}>
+                            v{versionInfo.latest} — update available
+                          </a>
+                        )
+                      ) : (
+                        <span style={{ opacity: 0.5 }}>unavailable</span>
+                      )}
+                    </dd>
+                  </dl>
+                </section>
+              )}
               <section className="panel admin-panel">
                 <div className="system-icon-header">
                   <div>
@@ -11513,19 +11558,8 @@ function MonitoringWorkspace({
           <p className="dash-subtitle">Network device uptime, latency and service health</p>
         </div>
         <div className="dash-header-meta">
-          <button
-            type="button"
-            className="dash-panel-link"
-            onClick={() => void load(true)}
-            disabled={refreshing}
-            title="Refresh now"
-            style={{ display: "flex", alignItems: "center", gap: 5 }}
-          >
-            <RefreshCw size={13} style={{ opacity: refreshing ? 0.4 : 1 }} />
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
           {fleet?.last_checked && (
-            <span>· Last poll {fmtTime(fleet.last_checked)}</span>
+            <span>Last poll {fmtTime(fleet.last_checked)}</span>
           )}
         </div>
       </div>

@@ -217,6 +217,24 @@ textarea {
   color: #9abcd0;
 }
 
+.sidebar-version {
+  padding: 6px 14px 10px;
+  font-size: 11px;
+  opacity: 0.45;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar-version-update {
+  color: var(--dash-yellow, #f0b429);
+  text-decoration: none;
+  opacity: 1;
+}
+
+.sidebar-version-update:hover {
+  text-decoration: underline;
+}
+
 .sidebar-link {
   display: flex;
   align-items: center;
