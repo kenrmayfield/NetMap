@@ -11,7 +11,8 @@ from app.api.deps import require_security_view
 from app.core.config import settings
 from app.core.security import decode_token
 from app.core.validation import normalize_ip, validate_port, validate_syslog_field
-from app.db.firewall_session import FirewallSessionLocal as SessionLocal, get_firewall_db
+from app.db.firewall_session import FirewallSessionLocal, get_firewall_db
+from app.db.session import SessionLocal
 from app.models.firewall_event import FirewallEvent
 from app.models.user import User, UserRole
 from app.schemas.firewall_event import FirewallEventList, FirewallEventRead, SyslogStatus

@@ -18,8 +18,18 @@ Everything runs in a single container. The web UI, API, database, and syslog rec
 
 ---
 
+## Screenshots
+
+<img src="https://github.com/user-attachments/assets/ffd0c6d9-072f-41c1-bd4e-15c3737ede6b" width="800" alt="Overview" />
+<img src="https://github.com/user-attachments/assets/f58ae91d-6b8e-40cb-95e5-f0a9975e97a6" width="800" alt="Topology" />
+<img src="https://github.com/user-attachments/assets/b6a666bb-ca75-4732-9416-4da65afcecfe" width="800" alt="Monitoring" />
+<img src="https://github.com/user-attachments/assets/13713071-f86e-432c-a503-d6069616109b" width="800" alt="IPAM" />
+
+---
+
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#-features)
 - [Installation](#-installation)
   - [Quick start](#quick-start)
@@ -132,6 +142,7 @@ services:
     environment:
       PUID: 1000
       PGID: 1000
+      TZ: "America/New_York"
       SECRET_KEY: "replace-with-generated-secret"
       MASTER_KEY: "replace-with-generated-fernet-key"
       TRUSTED_HOSTS: '["*"]'
@@ -192,6 +203,10 @@ services:
       # Run `id` in a terminal to find your UID and GID.
       PUID: 1000
       PGID: 1000
+
+      # Container timezone — affects log timestamps and scheduled tasks.
+      # Use a tz database name, e.g. Europe/London, America/New_York.
+      # TZ: UTC
 
       # Port the web UI listens on. Change if 8080 is already taken.
       APP_PORT: 8080
@@ -291,6 +306,7 @@ All configuration is done via environment variables in your compose file. There 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `TZ` | `UTC` | Container timezone. Use a tz database name (e.g. `Europe/London`, `America/New_York`). Affects log timestamps and scheduled tasks. |
 | `SECRET_KEY` | — | **Required.** Signs session tokens. Generate once, keep stable. |
 | `MASTER_KEY` | — | **Required.** Fernet key for encrypting stored secrets. Generate once, never change. |
 | `PUID` | `1000` | UID the container process runs as. Match your host user for correct bind mount permissions. |

@@ -33,6 +33,7 @@ RUN apt-get update \
        sudo \
        tini \
        traceroute \
+       tzdata \
   && rm -rf /var/lib/apt/lists/* \
   && echo "netmap ALL=(root) NOPASSWD: /usr/bin/nmap" > /etc/sudoers.d/netmap-nmap \
   && chmod 440 /etc/sudoers.d/netmap-nmap

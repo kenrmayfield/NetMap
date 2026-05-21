@@ -20,6 +20,10 @@ services:
       PUID: 1000
       PGID: 1000
 
+      # Container timezone — affects log timestamps and scheduled tasks.
+      # Use a tz database name, e.g. Europe/London, America/New_York.
+      # TZ: UTC
+
       # Required: replace these before first start.
       SECRET_KEY: replace-with-a-long-random-secret
       MASTER_KEY: replace-with-a-fernet-key
