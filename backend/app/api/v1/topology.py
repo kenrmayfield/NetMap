@@ -590,9 +590,10 @@ def list_top_affected_devices(
     window_start = correlation_window_start(bounded_window)
     devices = db.scalars(select(Device).order_by(Device.hostname, Device.ip_address)).all()
     event_counts = build_device_event_counts(firewall_db, devices, window_start=window_start)
+    _epoch = datetime.min.replace(tzinfo=timezone.utc)
     rows = sorted(
         event_counts.values(),
-        key=lambda row: (row.event_count, row.last_seen_event_time is not None, row.last_seen_event_time),
+        key=lambda row: (row.event_count, row.last_seen_event_time is not None, row.last_seen_event_time or _epoch),
         reverse=True,
     )
     filtered = [row for row in rows if row.event_count > 0][:bounded_limit]
