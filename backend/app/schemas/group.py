@@ -1,6 +1,7 @@
 from datetime import datetime
+import ipaddress
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.validation import normalize_cidr
 
@@ -11,6 +12,8 @@ class TopologyGroupBase(BaseModel):
     vlan_id: str | None = Field(default=None, max_length=16)
     ip_range: str | None = Field(default=None, max_length=64)
     gateway: str | None = Field(default=None, max_length=64)
+    dhcp_start: str | None = Field(default=None, max_length=64)
+    dhcp_end: str | None = Field(default=None, max_length=64)
     dns_servers: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
 
@@ -48,6 +51,19 @@ class TopologyGroupBase(BaseModel):
             return None
         return normalize_cidr(normalized)
 
+    @field_validator("gateway", "dhcp_start", "dhcp_end", "dns_servers")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_dhcp_range(self) -> "TopologyGroupBase":
+        validate_group_dhcp_range(self.ip_range, self.dhcp_start, self.dhcp_end)
+        return self
+
 
 class TopologyGroupCreate(TopologyGroupBase):
     pass
@@ -59,6 +75,8 @@ class TopologyGroupUpdate(BaseModel):
     vlan_id: str | None = Field(default=None, max_length=16)
     ip_range: str | None = Field(default=None, max_length=64)
     gateway: str | None = Field(default=None, max_length=64)
+    dhcp_start: str | None = Field(default=None, max_length=64)
+    dhcp_end: str | None = Field(default=None, max_length=64)
     dns_servers: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
 
@@ -97,6 +115,51 @@ class TopologyGroupUpdate(BaseModel):
         if not normalized:
             return None
         return normalize_cidr(normalized)
+
+    @field_validator("gateway", "dhcp_start", "dhcp_end", "dns_servers")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_dhcp_range(self) -> "TopologyGroupUpdate":
+        if self.ip_range is not None or self.dhcp_start is not None or self.dhcp_end is not None:
+            validate_group_dhcp_range(self.ip_range, self.dhcp_start, self.dhcp_end, allow_partial=True)
+        return self
+
+
+def validate_group_dhcp_range(
+    cidr: str | None,
+    start: str | None,
+    end: str | None,
+    *,
+    allow_partial: bool = False,
+) -> None:
+    if not start and not end:
+        return
+    if not start or not end:
+        if allow_partial:
+            return
+        raise ValueError("DHCP range requires both start and end IPs")
+    if not cidr:
+        if allow_partial:
+            return
+        raise ValueError("DHCP range requires a subnet CIDR")
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+        start_ip = ipaddress.ip_address(start)
+        end_ip = ipaddress.ip_address(end)
+    except ValueError as exc:
+        raise ValueError("Invalid DHCP range") from exc
+    if start_ip.version != net.version or end_ip.version != net.version:
+        raise ValueError("DHCP range IP version must match subnet")
+    if start_ip not in net or end_ip not in net:
+        raise ValueError("DHCP range must be inside the subnet")
+    if int(start_ip) > int(end_ip):
+        raise ValueError("DHCP range start must be before the end")
 
 
 class TopologyGroupRead(TopologyGroupBase):

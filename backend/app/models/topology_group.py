@@ -15,6 +15,8 @@ class TopologyGroup(Base):
     vlan_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     ip_range: Mapped[str | None] = mapped_column(String(64), nullable=True)
     gateway: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dhcp_start: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dhcp_end: Mapped[str | None] = mapped_column(String(64), nullable=True)
     dns_servers: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

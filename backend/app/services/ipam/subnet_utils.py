@@ -7,8 +7,8 @@ from dataclasses import dataclass
 @dataclass
 class IpStatus:
     ip: str
-    kind: str  # "network" | "broadcast" | "gateway" | "device" | "dhcp" | "free"
-    label: str | None = None  # device name or DHCP hostname
+    kind: str  # "network" | "broadcast" | "gateway" | "device" | "dhcp" | "reserved" | "free"
+    label: str | None = None  # device name, DHCP hostname, or reservation label
 
 
 def parse_network(cidr: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
@@ -20,6 +20,7 @@ def subnet_utilization(
     device_ips: set[str],
     dhcp_ips: set[str],
     gateway: str | None = None,
+    reserved_ips: set[str] | None = None,
 ) -> dict:
     try:
         net = parse_network(cidr)
@@ -27,7 +28,7 @@ def subnet_utilization(
         return {"total_hosts": 0, "used": 0, "free": 0, "utilization": 0.0, "valid": False}
 
     host_ips = {str(ip) for ip in net.hosts()}
-    used = host_ips & (device_ips | dhcp_ips)
+    used = host_ips & (device_ips | dhcp_ips | (reserved_ips or set()))
     if gateway and gateway in host_ips:
         used.add(gateway)
 
@@ -44,10 +45,11 @@ def subnet_utilization(
 
 def enumerate_addresses(
     cidr: str,
-    device_map: dict[str, str],   # ip -> device label
-    dhcp_map: dict[str, str],     # ip -> hostname
+    device_map: dict[str, str],        # ip -> device label
+    dhcp_map: dict[str, str],          # ip -> hostname
     gateway: str | None = None,
     max_hosts: int = 1024,
+    reservation_map: dict[str, str] | None = None,  # ip -> reservation label
 ) -> list[IpStatus]:
     """Return per-IP status for subnets up to max_hosts in size."""
     try:
@@ -58,6 +60,7 @@ def enumerate_addresses(
     if net.num_addresses > max_hosts + 2:
         return []  # too large — caller should fall back to summary
 
+    res_map = reservation_map or {}
     result: list[IpStatus] = []
     for ip_obj in net:
         ip = str(ip_obj)
@@ -71,14 +74,18 @@ def enumerate_addresses(
             result.append(IpStatus(ip=ip, kind="device", label=device_map[ip]))
         elif ip in dhcp_map:
             result.append(IpStatus(ip=ip, kind="dhcp", label=dhcp_map[ip] or None))
+        elif ip in res_map:
+            result.append(IpStatus(ip=ip, kind="reserved", label=res_map[ip]))
         else:
             result.append(IpStatus(ip=ip, kind="free"))
     return result
 
 
 def detect_conflicts(
-    subnets: list[tuple[int, str, str | None]],  # (id, cidr, name)
-    devices: list[tuple[int, str, str | None]],  # (id, ip, label)
+    subnets: list[tuple[int, str, str | None]],         # (id, cidr, name)
+    devices: list[tuple[int, str, str | None]],         # (id, ip, label)
+    dhcp_ips: set[str] | None = None,
+    reservations: list[tuple[str, str]] | None = None,  # (ip, label)
 ) -> list[dict]:
     conflicts: list[dict] = []
 
@@ -133,5 +140,26 @@ def detect_conflicts(
                 "ip": ip,
                 "device_id": dev_id,
             })
+
+    # Reserved IPs in use by a device or DHCP lease
+    if reservations:
+        device_ip_set = {ip for _, ip, _ in devices}
+        active_dhcp = dhcp_ips or set()
+        for res_ip, res_label in reservations:
+            if res_ip in device_ip_set:
+                dev = next((label or ip for _, ip, label in devices if ip == res_ip), res_ip)
+                conflicts.append({
+                    "type": "reserved_ip_in_use",
+                    "severity": "error",
+                    "description": f"Reserved IP {res_ip} ('{res_label}') is assigned to device '{dev}'",
+                    "ip": res_ip,
+                })
+            elif res_ip in active_dhcp:
+                conflicts.append({
+                    "type": "reserved_ip_in_use",
+                    "severity": "warning",
+                    "description": f"Reserved IP {res_ip} ('{res_label}') has an active DHCP lease",
+                    "ip": res_ip,
+                })
 
     return conflicts

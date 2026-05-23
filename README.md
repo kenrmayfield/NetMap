@@ -5,6 +5,11 @@
 
   [![Docker Pulls](https://img.shields.io/docker/pulls/xoriin/netmap?logo=docker&logoColor=white&color=1d9ab0)](https://hub.docker.com/r/xoriin/netmap)
   [![Image Size](https://img.shields.io/docker/image-size/xoriin/netmap/latest?logo=docker&logoColor=white&color=1d6472)](https://hub.docker.com/r/xoriin/netmap)
+  [![Version](https://img.shields.io/github/v/tag/xoriin/netmap?label=version&logo=github&logoColor=white&color=1d9ab0)](https://github.com/xoriin/netmap/tags)
+  [![Build](https://img.shields.io/github/actions/workflow/status/xoriin/netmap/docker-aio.yml?label=build&logo=github-actions&logoColor=white)](https://github.com/xoriin/netmap/actions/workflows/docker-aio.yml)
+  [![Stars](https://img.shields.io/github/stars/xoriin/netmap?logo=github&logoColor=white&color=091420)](https://github.com/xoriin/netmap/stargazers)
+  [![Issues](https://img.shields.io/github/issues/xoriin/netmap?logo=github&logoColor=white&color=1d6472)](https://github.com/xoriin/netmap/issues)
+  [![Last Commit](https://img.shields.io/github/last-commit/xoriin/netmap?logo=github&logoColor=white&color=1d9ab0)](https://github.com/xoriin/netmap/commits/main)
   [![License](https://img.shields.io/badge/license-GPL--3.0-091420)](LICENSE)
 </div>
 
@@ -557,3 +562,7 @@ The OpenAPI schema is available at `/api/openapi.json` if you want to generate a
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE) for details.
+
+---
+
+Parts of this project were built with assistance from [Claude](https://claude.ai) (Anthropic). All code is reviewed and owned by the project author.

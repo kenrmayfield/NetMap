@@ -139,6 +139,8 @@ export type TopologyGroup = {
   vlan_id: string | null;
   ip_range: string | null;
   gateway: string | null;
+  dhcp_start: string | null;
+  dhcp_end: string | null;
   dns_servers: string | null;
   description: string | null;
   created_at: string;
@@ -506,6 +508,8 @@ export type IpamSubnet = {
   vlan_id: string | null;
   site_id: number | null;
   gateway: string | null;
+  dhcp_start: string | null;
+  dhcp_end: string | null;
   dns_servers: string | null;
   notes: string | null;
   created_at: string;
@@ -516,14 +520,16 @@ export type IpamSubnet = {
   utilization: number;
   device_count: number;
   dhcp_count: number;
+  reservation_count: number;
 };
 
 export type IpAddressEntry = {
   ip: string;
-  kind: "network" | "broadcast" | "gateway" | "device" | "dhcp" | "free";
+  kind: "network" | "broadcast" | "gateway" | "device" | "dhcp" | "reserved" | "free";
   label: string | null;
   mac_address: string | null;
   vendor: string | null;
+  dhcp_range: boolean;
 };
 
 export type IpamConflict = {
@@ -542,6 +548,27 @@ export type IpamSummary = {
   utilization: number;
   conflict_count: number;
   dhcp_lease_count: number;
+  reservation_count: number;
+};
+
+export type IpReservation = {
+  id: number;
+  ip_address: string;
+  subnet_id: number | null;
+  label: string;
+  mac_address: string | null;
+  notes: string | null;
+  reserved_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IpReservationPayload = {
+  ip_address: string;
+  subnet_id?: number | null;
+  label: string;
+  mac_address?: string | null;
+  notes?: string | null;
 };
 
 export type DhcpLease = {
@@ -562,6 +589,8 @@ export type SubnetPayload = {
   vlan_id?: string | null;
   site_id?: number | null;
   gateway?: string | null;
+  dhcp_start?: string | null;
+  dhcp_end?: string | null;
   dns_servers?: string | null;
   notes?: string | null;
 };
@@ -803,7 +832,7 @@ export const api = {
     request<void>(`/api/v1/topology/sites/${siteId}`, { method: "DELETE", token }),
   createTopologyGroup: (
     token: string,
-    payload: { name: string; display_name: string | null; ip_range: string | null; description: string | null },
+    payload: { name: string; display_name: string | null; vlan_id?: string | null; ip_range: string | null; gateway?: string | null; dhcp_start?: string | null; dhcp_end?: string | null; dns_servers?: string | null; description: string | null },
   ) =>
     request<TopologyGroup>("/api/v1/topology/groups", {
       method: "POST",
@@ -813,7 +842,7 @@ export const api = {
   updateTopologyGroup: (
     token: string,
     groupId: number,
-    payload: Partial<{ name: string; display_name: string | null; ip_range: string | null; description: string | null }>,
+    payload: Partial<{ name: string; display_name: string | null; vlan_id: string | null; ip_range: string | null; gateway: string | null; dhcp_start: string | null; dhcp_end: string | null; dns_servers: string | null; description: string | null }>,
   ) =>
     request<TopologyGroup>(`/api/v1/topology/groups/${groupId}`, {
       method: "PATCH",
@@ -1151,5 +1180,13 @@ export const api = {
     request<{ imported: number }>("/api/v1/ipam/subnets/import-from-vlans", {
       method: "POST", token, body: JSON.stringify({ group_ids: groupIds }),
     }),
+  listReservations: (token: string) =>
+    request<IpReservation[]>("/api/v1/ipam/reservations", { token }),
+  createReservation: (token: string, payload: IpReservationPayload) =>
+    request<IpReservation>("/api/v1/ipam/reservations", { method: "POST", token, body: JSON.stringify(payload) }),
+  updateReservation: (token: string, id: number, payload: Partial<Omit<IpReservationPayload, "ip_address">>) =>
+    request<IpReservation>(`/api/v1/ipam/reservations/${id}`, { method: "PATCH", token, body: JSON.stringify(payload) }),
+  deleteReservation: (token: string, id: number) =>
+    request<void>(`/api/v1/ipam/reservations/${id}`, { method: "DELETE", token }),
   getVersion: (token: string) => request<VersionInfo>("/api/v1/system/version", { token }),
 };

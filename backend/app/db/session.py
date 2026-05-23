@@ -45,7 +45,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.models import alert_rule, auth_session, audit_log, device, dhcp_lease, discovery, monitor_history, password_reset_token, port_target, relationship, site, subnet, system_setting, topology_group, topology_layout, user  # noqa: F401
+    from app.models import alert_rule, auth_session, audit_log, device, dhcp_lease, discovery, ip_reservation, monitor_history, password_reset_token, port_target, relationship, site, subnet, system_setting, topology_group, topology_layout, user  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_migrations_table()
@@ -112,6 +112,9 @@ def apply_sqlite_schema_updates() -> None:
         _run_migration(conn, inspector, "0020_alert_events", _migrate_alert_events)
         _run_migration(conn, inspector, "0021_device_monitor_status", _migrate_device_monitor_status)
         _run_migration(conn, inspector, "0022_device_is_favourite", _migrate_device_is_favourite)
+        _run_migration(conn, inspector, "0023_ip_reservations", _migrate_ip_reservations)
+        _run_migration(conn, inspector, "0024_subnet_dhcp_range", _migrate_subnet_dhcp_range)
+        _run_migration(conn, inspector, "0025_topology_group_dhcp_range", _migrate_topology_group_dhcp_range)
 
 
 def _run_migration(conn, inspector, name: str, fn) -> None:
@@ -527,3 +530,46 @@ def _migrate_device_is_favourite(conn, inspector) -> None:
     existing = {col["name"] for col in inspector.get_columns("devices")}
     if "is_favourite" not in existing:
         conn.execute(text("ALTER TABLE devices ADD COLUMN is_favourite BOOLEAN DEFAULT 0"))
+
+
+def _migrate_ip_reservations(conn, inspector) -> None:
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS ip_reservations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_address VARCHAR(64) NOT NULL UNIQUE,
+                subnet_id INTEGER REFERENCES subnets(id) ON DELETE CASCADE,
+                label VARCHAR(120) NOT NULL,
+                mac_address VARCHAR(64),
+                notes TEXT,
+                reserved_by VARCHAR(80),
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ip_reservations_id ON ip_reservations (id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ip_reservations_ip ON ip_reservations (ip_address)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ip_reservations_subnet ON ip_reservations (subnet_id)"))
+
+
+def _migrate_subnet_dhcp_range(conn, inspector) -> None:
+    if "subnets" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("subnets")}
+    if "dhcp_start" not in existing:
+        conn.execute(text("ALTER TABLE subnets ADD COLUMN dhcp_start VARCHAR(64)"))
+    if "dhcp_end" not in existing:
+        conn.execute(text("ALTER TABLE subnets ADD COLUMN dhcp_end VARCHAR(64)"))
+
+
+def _migrate_topology_group_dhcp_range(conn, inspector) -> None:
+    if "topology_groups" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("topology_groups")}
+    if "dhcp_start" not in existing:
+        conn.execute(text("ALTER TABLE topology_groups ADD COLUMN dhcp_start VARCHAR(64)"))
+    if "dhcp_end" not in existing:
+        conn.execute(text("ALTER TABLE topology_groups ADD COLUMN dhcp_end VARCHAR(64)"))

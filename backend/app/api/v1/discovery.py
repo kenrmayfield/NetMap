@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models.device import Device
 from app.models.discovery import DiscoveryScan
+from app.models.topology_group import TopologyGroup
 from app.models.user import User
 from app.schemas.discovery import (
     DiscoveryHost,
@@ -165,6 +166,11 @@ def import_scan_results(
         if payload.site_id is not None:
             existing.site_id = payload.site_id
         updated += 1
+
+    if payload.topology_group_id is not None and "/" in scan.target:
+        group = db.get(TopologyGroup, payload.topology_group_id)
+        if group is not None and not group.ip_range:
+            group.ip_range = scan.target
 
     write_audit(
         db,

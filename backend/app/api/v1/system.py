@@ -7,7 +7,7 @@ import urllib.request
 
 from fastapi import APIRouter
 
-from app.core.config import settings
+from app.core.config import installed_app_version, settings
 
 router = APIRouter(prefix="/system", tags=["system"])
 logger = logging.getLogger(__name__)
@@ -28,7 +28,10 @@ def _fetch_latest_version() -> str | None:
         import json
         import re
         url = f"https://api.github.com/repos/{_GITHUB_REPO}/tags?per_page=10"
-        req = urllib.request.Request(url, headers={"User-Agent": f"netmap/{settings.app_version}"})
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": f"netmap/{installed_app_version(settings.app_version)}"},
+        )
         with urllib.request.urlopen(req, timeout=5) as resp:
             tags = json.loads(resp.read())
         for entry in tags:
@@ -45,12 +48,12 @@ def _fetch_latest_version() -> str | None:
 
 @router.get("/version")
 def get_version() -> dict:
-    current = settings.app_version.lstrip("v")
+    current = installed_app_version(settings.app_version).lstrip("v")
     latest = _fetch_latest_version()
     up_to_date = latest is None or latest == current
     return {
         "current": current,
         "latest": latest,
         "up_to_date": up_to_date,
-        "release_url": f"https://github.com/{_GITHUB_REPO}/releases",
+        "release_url": f"https://github.com/{_GITHUB_REPO}",
     }

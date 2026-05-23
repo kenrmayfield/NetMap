@@ -1,0 +1,147 @@
+import { useState, useEffect, type ReactNode } from "react";
+import { LogOut, Moon, Network, PanelLeftClose, PanelLeftOpen, Sun } from "lucide-react";
+import { type AppRoute, appRoutes, appRouteByHref, appRouteCopy } from "./routes";
+import { type User, type VersionInfo } from "./api/client";
+
+export function Sidebar({
+  canAccessAdmin,
+  canAccessExports,
+  canViewSecurity,
+  collapsed,
+  currentRoute,
+  onLogout,
+  onToggleTheme,
+  onToggleCollapse,
+  theme,
+  onNavigate,
+  versionInfo,
+}: {
+  canAccessAdmin: boolean;
+  canAccessExports: boolean;
+  canViewSecurity: boolean;
+  collapsed: boolean;
+  currentRoute: AppRoute;
+  onLogout: () => void;
+  onToggleTheme: () => void;
+  onToggleCollapse: () => void;
+  theme: "light" | "dark";
+  onNavigate: (route: AppRoute) => void;
+  versionInfo: VersionInfo | null;
+}) {
+  return (
+    <aside className={collapsed ? "sidebar sidebar--collapsed" : "sidebar"} aria-label="Primary navigation">
+      <div className="brand">
+        <Network size={24} aria-hidden="true" />
+        {!collapsed && <span>NetMap</span>}
+      </div>
+      <button
+        type="button"
+        className="sidebar-collapse-btn"
+        onClick={onToggleCollapse}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+        {!collapsed && <span className="nav-label">Collapse</span>}
+      </button>
+      <nav>
+        {appRoutes
+          .filter((route) => !route.requiresSecurityRole || canViewSecurity)
+          .filter((route) => !route.requiresSuperAdmin || canAccessAdmin)
+          .filter((route) => route.href !== "/exports" || canAccessExports)
+          .map((route) => {
+            const Icon = route.icon;
+            return (
+              <div key={route.href}>
+	                {route.section && !collapsed && (
+	                  <>
+	                    {route.section !== "Network" && <span className="sidebar-section-rule" aria-hidden="true" />}
+	                    <div className="sidebar-section-label">{route.section}</div>
+	                  </>
+	                )}
+                <button
+                  className={route.href === currentRoute ? "sidebar-link active" : "sidebar-link"}
+                  type="button"
+                  title={collapsed ? route.label : undefined}
+                  onClick={() => onNavigate(route.href)}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  {!collapsed && route.label}
+                </button>
+              </div>
+            );
+          })}
+      </nav>
+      <button className="sidebar-theme-toggle" type="button" onClick={onToggleTheme} title={collapsed ? (theme === "dark" ? "Light mode" : "Dark mode") : undefined}>
+        {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
+        {!collapsed && (theme === "dark" ? "Light mode" : "Dark mode")}
+      </button>
+      <button className="sidebar-logout" type="button" onClick={onLogout} title={collapsed ? "Sign out" : undefined}>
+        <LogOut size={16} aria-hidden="true" />
+        {!collapsed && "Sign out"}
+      </button>
+      {versionInfo && (
+        <div className="sidebar-version" title={collapsed ? `v${versionInfo.current}` : undefined}>
+          {!collapsed && (
+            <span>
+              v{versionInfo.current}
+              {!versionInfo.up_to_date && versionInfo.latest && (
+                <a href={versionInfo.release_url} target="_blank" rel="noreferrer" className="sidebar-version-update">
+                  {" "}↑ v{versionInfo.latest}
+                </a>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+export function AppTopbar({ currentRoute, user, note }: { currentRoute: AppRoute; user: User; note?: ReactNode }) {
+  const route = appRouteByHref.get(currentRoute) ?? appRoutes[0];
+  const Icon = route.icon;
+  const copy = appRouteCopy[currentRoute] ?? { title: route.label, subtitle: "" };
+  const [now, setNow] = useState(new Date());
+  const displayName = user.display_name || user.username;
+  const hour = now.getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const dateStr = now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const showGreeting = currentRoute === "/overview";
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return (
+    <header className="app-topbar">
+      <div className="app-topbar-route">
+        <span className="app-topbar-icon" aria-hidden="true">
+          <Icon size={24} />
+        </span>
+        <div className="app-topbar-copy">
+          <strong>{copy.title}</strong>
+          {copy.subtitle && <small>{copy.subtitle}</small>}
+        </div>
+      </div>
+      <div className="app-topbar-account">
+        {currentRoute === "/monitoring" && (
+          <div className="app-topbar-mon-status">
+            <span className="app-topbar-status"><span aria-hidden="true" />Live</span>
+            {note && <span className="app-topbar-note">{note}</span>}
+          </div>
+        )}
+        {currentRoute === "/ipam" && note && <span className="app-topbar-note">{note}</span>}
+        {currentRoute === "/locations" && note}
+        {currentRoute === "/security" && note}
+        {showGreeting && (
+          <div className="app-topbar-greeting">
+            <strong>{greeting}, {displayName}</strong>
+            <span>{dateStr} · <span className="dash-clock">{timeStr}</span></span>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}

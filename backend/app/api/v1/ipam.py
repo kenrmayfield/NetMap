@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -11,6 +12,7 @@ from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.device import Device
 from app.models.dhcp_lease import DhcpLease
+from app.models.ip_reservation import IpReservation
 from app.models.subnet import Subnet
 from app.models.user import User
 from app.models.topology_group import TopologyGroup
@@ -20,6 +22,9 @@ from app.schemas.ipam import (
     DhcpLeaseOut,
     IpAddressEntry,
     IpamSummary,
+    IpReservationCreate,
+    IpReservationOut,
+    IpReservationUpdate,
     SubnetCreate,
     SubnetOut,
     SubnetUpdate,
@@ -49,19 +54,23 @@ def _dhcp_ips(db: Session) -> set[str]:
     return set(db.scalars(select(DhcpLease.ip_address).where(DhcpLease.is_active == True)).all())  # noqa: E712
 
 
-def _enrich_subnet(subnet: Subnet, device_ips: set[str], dhcp_ips: set[str]) -> SubnetOut:
-    stats = subnet_utilization(subnet.cidr, device_ips, dhcp_ips, subnet.gateway)
+def _reserved_ips(db: Session) -> set[str]:
+    return set(db.scalars(select(IpReservation.ip_address)).all())
+
+
+def _enrich_subnet(subnet: Subnet, device_ips: set[str], dhcp_ips: set[str], reserved_ips: set[str] | None = None) -> SubnetOut:
+    stats = subnet_utilization(subnet.cidr, device_ips, dhcp_ips, subnet.gateway, reserved_ips or set())
     out = SubnetOut.model_validate(subnet)
     out.total_hosts = stats["total_hosts"]
     out.used = stats["used"]
     out.free = stats["free"]
     out.utilization = stats["utilization"]
-    # count devices and leases actually in this subnet
     import ipaddress
     try:
         net = ipaddress.ip_network(subnet.cidr, strict=False)
         out.device_count = sum(1 for ip in device_ips if _in_net(ip, net))
         out.dhcp_count = sum(1 for ip in dhcp_ips if _in_net(ip, net))
+        out.reservation_count = sum(1 for ip in (reserved_ips or set()) if _in_net(ip, net))
     except ValueError:
         pass
     return out
@@ -76,10 +85,38 @@ def _in_net(ip: str, net) -> bool:  # type: ignore[no-untyped-def]
 
 
 def _is_valid_cidr(cidr: str) -> bool:
-    import ipaddress
     try:
         ipaddress.ip_network(cidr, strict=False)
         return True
+    except ValueError:
+        return False
+
+
+def _validate_dhcp_range(cidr: str, start: str | None, end: str | None) -> None:
+    if not start and not end:
+        return
+    if not start or not end:
+        raise HTTPException(status_code=422, detail="DHCP range requires both start and end IPs")
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+        start_ip = ipaddress.ip_address(start)
+        end_ip = ipaddress.ip_address(end)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid DHCP range")
+    if start_ip.version != net.version or end_ip.version != net.version:
+        raise HTTPException(status_code=422, detail="DHCP range IP version must match subnet")
+    if start_ip not in net or end_ip not in net:
+        raise HTTPException(status_code=422, detail="DHCP range must be inside the subnet")
+    if int(start_ip) > int(end_ip):
+        raise HTTPException(status_code=422, detail="DHCP range start must be before the end")
+
+
+def _in_dhcp_range(ip: str, start: str | None, end: str | None) -> bool:
+    if not start or not end:
+        return False
+    try:
+        value = ipaddress.ip_address(ip)
+        return int(ipaddress.ip_address(start)) <= int(value) <= int(ipaddress.ip_address(end))
     except ValueError:
         return False
 
@@ -95,19 +132,23 @@ def ipam_summary(
     devices = db.execute(select(Device.id, Device.ip_address, Device.display_name, Device.hostname)).all()
     device_ips = {row.ip_address for row in devices}
     dhcp_ips = _dhcp_ips(db)
+    res_ips = _reserved_ips(db)
 
     total_hosts = used = free = 0
     for s in subnets:
-        stats = subnet_utilization(s.cidr, device_ips, dhcp_ips, s.gateway)
+        stats = subnet_utilization(s.cidr, device_ips, dhcp_ips, s.gateway, res_ips)
         total_hosts += stats["total_hosts"]
         used += stats["used"]
         free += stats["free"]
 
     subnet_rows = [(s.id, s.cidr, s.name) for s in subnets]
     device_rows = [(row.id, row.ip_address, row.display_name or row.hostname or row.ip_address) for row in devices]
-    conflicts = detect_conflicts(subnet_rows, device_rows)
+    res_rows = db.execute(select(IpReservation.ip_address, IpReservation.label)).all()
+    reservation_list = [(row.ip_address, row.label) for row in res_rows]
+    conflicts = detect_conflicts(subnet_rows, device_rows, dhcp_ips=dhcp_ips, reservations=reservation_list)
 
     dhcp_count = db.scalar(select(func.count()).select_from(DhcpLease)) or 0
+    reservation_count = db.scalar(select(func.count()).select_from(IpReservation)) or 0
 
     return IpamSummary(
         subnet_count=len(subnets),
@@ -117,6 +158,7 @@ def ipam_summary(
         utilization=used / total_hosts if total_hosts > 0 else 0.0,
         conflict_count=len(conflicts),
         dhcp_lease_count=dhcp_count,
+        reservation_count=reservation_count,
     )
 
 
@@ -130,7 +172,8 @@ def list_subnets(
     subnets = db.scalars(select(Subnet).order_by(Subnet.name)).all()
     device_ips = _device_ips(db)
     dhcp_ips = _dhcp_ips(db)
-    return [_enrich_subnet(s, device_ips, dhcp_ips) for s in subnets]
+    res_ips = _reserved_ips(db)
+    return [_enrich_subnet(s, device_ips, dhcp_ips, res_ips) for s in subnets]
 
 
 @router.post("/subnets", response_model=SubnetOut, status_code=201)
@@ -140,11 +183,11 @@ def create_subnet(
     db: Annotated[Session, Depends(get_db)],
 ) -> SubnetOut:
     _require_write(current_user)
-    import ipaddress
     try:
         ipaddress.ip_network(payload.cidr, strict=False)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid CIDR: {payload.cidr}")
+    _validate_dhcp_range(payload.cidr, payload.dhcp_start, payload.dhcp_end)
     existing = db.scalar(select(Subnet).where(Subnet.cidr == payload.cidr))
     if existing:
         raise HTTPException(status_code=409, detail="A subnet with this CIDR already exists")
@@ -152,7 +195,7 @@ def create_subnet(
     db.add(subnet)
     db.commit()
     db.refresh(subnet)
-    return _enrich_subnet(subnet, _device_ips(db), _dhcp_ips(db))
+    return _enrich_subnet(subnet, _device_ips(db), _dhcp_ips(db), _reserved_ips(db))
 
 
 @router.patch("/subnets/{subnet_id}", response_model=SubnetOut)
@@ -166,12 +209,22 @@ def update_subnet(
     subnet = db.get(Subnet, subnet_id)
     if not subnet:
         raise HTTPException(status_code=404, detail="Subnet not found")
-    for field, val in payload.model_dump(exclude_unset=True).items():
+    proposed = payload.model_dump(exclude_unset=True)
+    next_cidr = proposed.get("cidr", subnet.cidr)
+    next_dhcp_start = proposed.get("dhcp_start", subnet.dhcp_start)
+    next_dhcp_end = proposed.get("dhcp_end", subnet.dhcp_end)
+    if next_cidr is not None:
+        try:
+            ipaddress.ip_network(next_cidr, strict=False)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid CIDR: {next_cidr}")
+        _validate_dhcp_range(next_cidr, next_dhcp_start, next_dhcp_end)
+    for field, val in proposed.items():
         setattr(subnet, field, val)
     subnet.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(subnet)
-    return _enrich_subnet(subnet, _device_ips(db), _dhcp_ips(db))
+    return _enrich_subnet(subnet, _device_ips(db), _dhcp_ips(db), _reserved_ips(db))
 
 
 @router.delete("/subnets/{subnet_id}", status_code=204, response_model=None)
@@ -205,14 +258,23 @@ def subnet_addresses(
     leases = db.execute(select(DhcpLease.ip_address, DhcpLease.hostname, DhcpLease.mac_address).where(DhcpLease.is_active == True)).all()  # noqa: E712
     dhcp_map = {row.ip_address: row.hostname or "" for row in leases}
     dhcp_mac: dict[str, str | None] = {row.ip_address: row.mac_address for row in leases}
+    reservations = db.execute(select(IpReservation.ip_address, IpReservation.label, IpReservation.mac_address)).all()
+    reservation_map = {row.ip_address: row.label for row in reservations}
+    reservation_mac: dict[str, str | None] = {row.ip_address: row.mac_address for row in reservations}
 
-    entries = enumerate_addresses(subnet.cidr, device_map, dhcp_map, subnet.gateway)
+    entries = enumerate_addresses(subnet.cidr, device_map, dhcp_map, subnet.gateway, reservation_map=reservation_map)
     return [
         IpAddressEntry(
             ip=e.ip,
             kind=e.kind,
             label=e.label,
-            mac_address=device_mac.get(e.ip) if e.kind == "device" else dhcp_mac.get(e.ip) if e.kind == "dhcp" else None,
+            dhcp_range=_in_dhcp_range(e.ip, subnet.dhcp_start, subnet.dhcp_end),
+            mac_address=(
+                device_mac.get(e.ip) if e.kind == "device"
+                else dhcp_mac.get(e.ip) if e.kind == "dhcp"
+                else reservation_mac.get(e.ip) if e.kind == "reserved"
+                else None
+            ),
             vendor=device_vendor.get(e.ip) if e.kind == "device" else None,
         )
         for e in entries
@@ -290,10 +352,12 @@ def import_subnets_from_vlans(
             continue
         db.add(Subnet(
             name=group.display_name or group.name,
-            cidr=normalized,
-            vlan_id=group.vlan_id,
-            gateway=group.gateway,
-            dns_servers=group.dns_servers,
+	            cidr=normalized,
+	            vlan_id=group.vlan_id,
+	            gateway=group.gateway,
+	            dhcp_start=group.dhcp_start,
+	            dhcp_end=group.dhcp_end,
+	            dns_servers=group.dns_servers,
             created_at=now,
             updated_at=now,
         ))
@@ -301,6 +365,77 @@ def import_subnets_from_vlans(
         imported += 1
     db.commit()
     return {"imported": imported}
+
+
+# ── IP reservations ───────────────────────────────────────────────────────────
+
+@router.get("/reservations", response_model=list[IpReservationOut])
+def list_reservations(
+    _current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[IpReservationOut]:
+    return list(db.scalars(select(IpReservation).order_by(IpReservation.ip_address)).all())
+
+
+@router.post("/reservations", response_model=IpReservationOut, status_code=201)
+def create_reservation(
+    payload: IpReservationCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> IpReservationOut:
+    _require_write(current_user)
+    import ipaddress
+    try:
+        ipaddress.ip_address(payload.ip_address)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid IP address: {payload.ip_address}")
+    existing = db.scalar(select(IpReservation).where(IpReservation.ip_address == payload.ip_address))
+    if existing:
+        raise HTTPException(status_code=409, detail="This IP address is already reserved")
+    now = datetime.now(timezone.utc)
+    reservation = IpReservation(
+        **payload.model_dump(),
+        reserved_by=current_user.username,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(reservation)
+    db.commit()
+    db.refresh(reservation)
+    return IpReservationOut.model_validate(reservation)
+
+
+@router.patch("/reservations/{reservation_id}", response_model=IpReservationOut)
+def update_reservation(
+    reservation_id: int,
+    payload: IpReservationUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> IpReservationOut:
+    _require_write(current_user)
+    reservation = db.get(IpReservation, reservation_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    for field, val in payload.model_dump(exclude_unset=True).items():
+        setattr(reservation, field, val)
+    reservation.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(reservation)
+    return IpReservationOut.model_validate(reservation)
+
+
+@router.delete("/reservations/{reservation_id}", status_code=204, response_model=None)
+def delete_reservation(
+    reservation_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    _require_write(current_user)
+    reservation = db.get(IpReservation, reservation_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    db.delete(reservation)
+    db.commit()
 
 
 # ── conflicts ─────────────────────────────────────────────────────────────────
@@ -312,9 +447,12 @@ def list_conflicts(
 ) -> list[ConflictEntry]:
     subnets = db.scalars(select(Subnet)).all()
     devices = db.execute(select(Device.id, Device.ip_address, Device.display_name, Device.hostname)).all()
+    dhcp_ips_set = _dhcp_ips(db)
+    res_rows = db.execute(select(IpReservation.ip_address, IpReservation.label)).all()
     subnet_rows = [(s.id, s.cidr, s.name) for s in subnets]
     device_rows = [(row.id, row.ip_address, row.display_name or row.hostname or row.ip_address) for row in devices]
-    return [ConflictEntry(**c) for c in detect_conflicts(subnet_rows, device_rows)]
+    reservation_list = [(row.ip_address, row.label) for row in res_rows]
+    return [ConflictEntry(**c) for c in detect_conflicts(subnet_rows, device_rows, dhcp_ips=dhcp_ips_set, reservations=reservation_list)]
 
 
 # ── DHCP leases ───────────────────────────────────────────────────────────────

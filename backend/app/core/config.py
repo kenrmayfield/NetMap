@@ -1,15 +1,33 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+VERSION_FILE_CANDIDATES = (
+    Path("/app/VERSION"),
+    Path(__file__).resolve().parents[3] / "VERSION",
+)
+
+
 def _read_version_file() -> str:
-    try:
-        return Path("/app/VERSION").read_text().strip()
-    except OSError:
-        return "dev"
+    for path in VERSION_FILE_CANDIDATES:
+        try:
+            version = path.read_text().strip()
+            if version:
+                return version
+        except OSError:
+            continue
+    return os.getenv("APP_VERSION", "dev")
+
+
+def installed_app_version(configured_version: str | None = None) -> str:
+    version = _read_version_file()
+    if version != "dev":
+        return version
+    return (configured_version or os.getenv("APP_VERSION") or version).strip() or "dev"
 
 
 class Settings(BaseSettings):

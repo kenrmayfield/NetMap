@@ -15,6 +15,7 @@ from app.db.session import get_db
 from app.models.device import Device
 from app.models.relationship import DeviceRelationship
 from app.models.site import Site
+from app.models.subnet import Subnet
 from app.models.topology_group import TopologyGroup
 from app.models.topology_layout import TopologyLayout
 from app.models.user import User
@@ -25,6 +26,7 @@ from app.schemas.group import (
     TopologyGroupCreate,
     TopologyGroupRead,
     TopologyGroupUpdate,
+    validate_group_dhcp_range,
 )
 from app.schemas.site import SiteCreate, SiteRead, SiteUpdate
 from app.schemas.topology import (
@@ -52,6 +54,36 @@ from app.services.tools.service import ping_host
 from app.services.topology.service import device_to_dict, serialize_tags
 
 router = APIRouter(prefix="/topology", tags=["topology"])
+
+
+def _sync_group_ipam_subnet(
+    db: Session,
+    group: TopologyGroup,
+    previous_cidr: str | None = None,
+    previous_vlan: str | None = None,
+) -> None:
+    matches: list[Subnet] = []
+    if group.ip_range:
+        matches.extend(db.scalars(select(Subnet).where(Subnet.cidr == group.ip_range)).all())
+    if previous_cidr and previous_cidr != group.ip_range:
+        matches.extend(db.scalars(select(Subnet).where(Subnet.cidr == previous_cidr)).all())
+    if group.vlan_id:
+        matches.extend(db.scalars(select(Subnet).where(Subnet.vlan_id == group.vlan_id)).all())
+    if previous_vlan and previous_vlan != group.vlan_id:
+        matches.extend(db.scalars(select(Subnet).where(Subnet.vlan_id == previous_vlan)).all())
+
+    seen: set[int] = set()
+    for subnet in matches:
+        if subnet.id in seen:
+            continue
+        seen.add(subnet.id)
+        if group.ip_range:
+            subnet.cidr = group.ip_range
+        subnet.vlan_id = group.vlan_id
+        subnet.gateway = group.gateway
+        subnet.dhcp_start = group.dhcp_start
+        subnet.dhcp_end = group.dhcp_end
+        subnet.dns_servers = group.dns_servers
 MAX_LIVE_STATUS_DEVICES = 64
 LIVE_STATUS_FALLBACK_PORTS = (22, 80, 443, 53)
 
@@ -178,6 +210,7 @@ def create_topology_group(
     group = TopologyGroup(**payload.model_dump())
     db.add(group)
     db.flush()
+    _sync_group_ipam_subnet(db, group)
     write_audit(
         db,
         action="topology.group_created",
@@ -201,6 +234,17 @@ def update_topology_group(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    previous_cidr = group.ip_range
+    previous_vlan = group.vlan_id
+    if {"ip_range", "dhcp_start", "dhcp_end"} & set(updates):
+        try:
+            validate_group_dhcp_range(
+                updates.get("ip_range", group.ip_range),
+                updates.get("dhcp_start", group.dhcp_start),
+                updates.get("dhcp_end", group.dhcp_end),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     if "name" in updates:
         name_exists = db.scalar(
             select(TopologyGroup).where(TopologyGroup.name == updates["name"], TopologyGroup.id != group.id)
@@ -224,6 +268,7 @@ def update_topology_group(
 
     for field, value in updates.items():
         setattr(group, field, value)
+    _sync_group_ipam_subnet(db, group, previous_cidr=previous_cidr, previous_vlan=previous_vlan)
 
     write_audit(
         db,
