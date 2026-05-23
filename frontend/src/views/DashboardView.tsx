@@ -23,6 +23,8 @@ export function DashboardView({
   graph,
   livePingEnabled,
   onGraphChange,
+  onDeviceChange,
+  onDevicesRemove,
   onNavigate,
   onUserUpdate,
   theme,
@@ -43,6 +45,8 @@ export function DashboardView({
   graph: TopologyGraph;
   livePingEnabled: boolean;
   onGraphChange: () => Promise<void>;
+  onDeviceChange: (device: Device) => void;
+  onDevicesRemove: (deviceIds: number[]) => void;
   onNavigate: (route: AppRoute) => void;
   onUserUpdate: (user: User) => void;
   theme: "light" | "dark";
@@ -95,7 +99,16 @@ export function DashboardView({
         />
       )}
       {currentRoute === "/inventory" && accessToken && (
-        <InventoryWorkspace accessToken={accessToken} canViewSecurity={canViewSecurity} canWrite={canWrite} graph={graph} onGraphChange={onGraphChange} livePingEnabled={livePingEnabled} />
+        <InventoryWorkspace
+          accessToken={accessToken}
+          canViewSecurity={canViewSecurity}
+          canWrite={canWrite}
+          graph={graph}
+          onDeviceChange={onDeviceChange}
+          onDevicesRemove={onDevicesRemove}
+          onGraphChange={onGraphChange}
+          livePingEnabled={livePingEnabled}
+        />
       )}
       {currentRoute === "/vlans" && accessToken && (
         <VlanWorkspace accessToken={accessToken} canWrite={canWrite} graph={graph} onGraphChange={onGraphChange} />
