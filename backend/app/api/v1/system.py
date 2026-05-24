@@ -1,13 +1,26 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
+from app.api.deps import require_super_admin
 from app.core.config import installed_app_version, settings
+from app.db.session import get_db
+from app.models.device import Device
+from app.models.monitor_history import DeviceMonitorHistory
+from app.models.user import User
+from app.api.v1.monitoring import monitoring_cache_status
+from app.services.syslog.storage import count_events, get_retention_status
 
 router = APIRouter(prefix="/system", tags=["system"])
 logger = logging.getLogger(__name__)
@@ -57,3 +70,60 @@ def get_version() -> dict:
         "up_to_date": up_to_date,
         "release_url": f"https://github.com/{_GITHUB_REPO}",
     }
+
+
+@router.get("/diagnostics")
+def get_diagnostics(
+    _current_user: Annotated[User, Depends(require_super_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    retention = get_retention_status()
+    data_dir = Path(settings.data_dir)
+    last_monitor_check = db.scalar(select(func.max(DeviceMonitorHistory.checked_at)))
+    device_status_rows = db.execute(
+        select(Device.monitor_status, func.count())
+        .where(Device.status != "disabled")
+        .group_by(Device.monitor_status)
+    ).all()
+    return {
+        "generated_at": datetime.now(timezone.utc),
+        "database": {
+            "main": _sqlite_file_sizes(data_dir / "netmap.db"),
+            "firewall": _sqlite_file_sizes(data_dir / "firewall.db"),
+        },
+        "monitoring": {
+            "last_checked_at": last_monitor_check,
+            "device_status_counts": {status or "unknown": int(count or 0) for status, count in device_status_rows},
+            "cache": monitoring_cache_status(),
+        },
+        "syslog": {
+            "total_events": count_events(),
+            "retention_last_run_at": retention.last_run_at,
+            "retention_last_deleted": retention.last_deleted,
+            "retention_last_error": retention.last_error,
+            "last_event_received_at": retention.last_event_received_at,
+        },
+        "process": {
+            "pid": os.getpid(),
+        },
+    }
+
+
+def _sqlite_file_sizes(db_path: Path) -> dict[str, int | bool]:
+    db_size = _file_size(db_path)
+    wal_size = _file_size(Path(f"{db_path}-wal"))
+    shm_size = _file_size(Path(f"{db_path}-shm"))
+    return {
+        "exists": db_path.exists(),
+        "bytes": db_size,
+        "wal_bytes": wal_size,
+        "shm_bytes": shm_size,
+        "total_bytes": db_size + wal_size + shm_size,
+    }
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:
+        return 0

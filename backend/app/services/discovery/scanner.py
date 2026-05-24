@@ -2,7 +2,7 @@ import json
 import math
 import subprocess
 from dataclasses import dataclass
-from ipaddress import ip_address, ip_network
+from ipaddress import ip_address, ip_network, summarize_address_range
 from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree
@@ -21,6 +21,10 @@ from app.schemas.discovery import DiscoveryHost
 class DiscoveryTarget:
     nmap_target: str
     host_count: int
+    nmap_args: tuple[str, ...] | None = None
+
+    def command_targets(self) -> tuple[str, ...]:
+        return self.nmap_args or (self.nmap_target,)
 
 
 PRIVATE_SCAN_NETWORKS = [
@@ -63,21 +67,35 @@ def validate_target(raw_target: str, confirm_large_scan: bool) -> DiscoveryTarge
 
 def validate_range(target: str, confirm_large_scan: bool) -> DiscoveryTarget:
     start_raw, end_raw = [part.strip() for part in target.split("-", 1)]
-    start = ip_address(start_raw)
-    end = ip_address(end_raw)
+    try:
+        start = ip_address(start_raw)
+        end = ip_address(end_raw)
+    except ValueError as exc:
+        raise ValueError("Use a private single IP, IP range, or CIDR target") from exc
     if start.version != end.version:
         raise ValueError("IP range must use one address family")
     if int(end) < int(start):
         raise ValueError("IP range end must be greater than start")
     host_count = int(end) - int(start) + 1
-    ensure_private_address(start)
-    ensure_private_address(end)
+    range_networks = tuple(summarize_address_range(start, end))
+    ensure_private_range(range_networks)
     ensure_scan_size(host_count, confirm_large_scan)
-    return DiscoveryTarget(f"{start}-{end}", host_count)
+    return DiscoveryTarget(f"{start}-{end}", host_count, tuple(str(network) for network in range_networks))
 
 
 def ensure_private_network(network) -> None:
-    if not any(network.subnet_of(private) or network.overlaps(private) for private in PRIVATE_SCAN_NETWORKS):
+    if not any(
+        network.version == private.version and (network.subnet_of(private) or network.overlaps(private))
+        for private in PRIVATE_SCAN_NETWORKS
+    ):
+        raise ValueError("Public IP scanning is blocked by default")
+
+
+def ensure_private_range(networks) -> None:
+    if not all(
+        any(network.version == private.version and network.subnet_of(private) for private in PRIVATE_SCAN_NETWORKS)
+        for network in networks
+    ):
         raise ValueError("Public IP scanning is blocked by default")
 
 
@@ -131,7 +149,7 @@ def run_nmap_scan(target: DiscoveryTarget, scan_type: str) -> list[DiscoveryHost
     else:
         raise ValueError("Unsupported scan type")
 
-    command.append(target.nmap_target)
+    command.extend(target.command_targets())
     timeout_seconds = discovery_process_timeout_seconds(target, scan_type)
 
     try:

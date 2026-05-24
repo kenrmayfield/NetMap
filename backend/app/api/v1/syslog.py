@@ -4,7 +4,7 @@ from typing import Annotated
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import Select, asc, desc, func, or_, select
+from sqlalchemy import Select, asc, desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_security_view
@@ -34,6 +34,11 @@ SORT_COLUMNS = {
     "protocol": FirewallEvent.protocol,
     "interface": FirewallEvent.interface,
 }
+
+
+def fts_query(raw_query: str) -> str:
+    escaped = raw_query.strip().replace('"', '""')
+    return f'"{escaped}"'
 
 
 @router.get("/status", response_model=SyslogStatus)
@@ -194,10 +199,16 @@ def apply_event_filters(
     end_time: datetime | None,
 ) -> Select:
     if q:
+        search_value = q.strip()
+        if not search_value:
+            return query
         like = f"%{q.strip()}%"
+        raw_log_matches = select(text("rowid")).select_from(text("firewall_events_fts")).where(
+            text("firewall_events_fts MATCH :fts_query")
+        ).params(fts_query=fts_query(search_value))
         query = query.where(
             or_(
-                FirewallEvent.raw_log.ilike(like),
+                FirewallEvent.id.in_(raw_log_matches),
                 FirewallEvent.src_ip.ilike(like),
                 FirewallEvent.dst_ip.ilike(like),
                 FirewallEvent.source_host.ilike(like),

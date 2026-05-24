@@ -32,6 +32,29 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 _MONITORING_CACHE_TTL = 10.0  # seconds — monitoring data updates every 5 min; 10s is plenty
 _fleet_summary_cache: tuple[float, Any] | None = None
 _device_summaries_cache: tuple[float, Any] | None = None
+_fleet_summary_cache_hits = 0
+_fleet_summary_cache_misses = 0
+_device_summaries_cache_hits = 0
+_device_summaries_cache_misses = 0
+
+
+def monitoring_cache_status() -> dict[str, object]:
+    now_mono = time.monotonic()
+    return {
+        "ttl_seconds": _MONITORING_CACHE_TTL,
+        "fleet_summary": {
+            "cached": _fleet_summary_cache is not None,
+            "age_seconds": (now_mono - _fleet_summary_cache[0]) if _fleet_summary_cache else None,
+            "hits": _fleet_summary_cache_hits,
+            "misses": _fleet_summary_cache_misses,
+        },
+        "device_summaries": {
+            "cached": _device_summaries_cache is not None,
+            "age_seconds": (now_mono - _device_summaries_cache[0]) if _device_summaries_cache else None,
+            "hits": _device_summaries_cache_hits,
+            "misses": _device_summaries_cache_misses,
+        },
+    }
 
 
 def _parse_port_results(raw: str) -> list[PortResult]:
@@ -47,11 +70,13 @@ def fleet_summary(
     _current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> FleetSummary:
-    global _fleet_summary_cache
+    global _fleet_summary_cache, _fleet_summary_cache_hits, _fleet_summary_cache_misses
     now_mono = time.monotonic()
     cached = _fleet_summary_cache
     if cached is not None and now_mono - cached[0] < _MONITORING_CACHE_TTL:
+        _fleet_summary_cache_hits += 1
         return cached[1]
+    _fleet_summary_cache_misses += 1
 
     status_rows = db.execute(
         select(Device.monitor_status, func.count())
@@ -223,11 +248,13 @@ def list_device_summaries(
         return _build_device_summaries(db, list(devices))
 
     # Full path: use TTL cache
-    global _device_summaries_cache
+    global _device_summaries_cache, _device_summaries_cache_hits, _device_summaries_cache_misses
     now_mono = time.monotonic()
     cached = _device_summaries_cache
     if cached is not None and now_mono - cached[0] < _MONITORING_CACHE_TTL:
+        _device_summaries_cache_hits += 1
         return cached[1]
+    _device_summaries_cache_misses += 1
 
     devices = db.scalars(select(Device).where(Device.status != "disabled")).all()
     results = _build_device_summaries(db, list(devices))

@@ -8,10 +8,68 @@ from app.services.discovery.scanner import (
     ping_host_timeout_seconds,
     port_scan_host_timeout_seconds,
     run_nmap_scan,
+    validate_target,
 )
 
 
 class DiscoveryScannerTests(unittest.TestCase):
+    def test_validate_target_converts_full_ipv4_range_to_nmap_safe_cidrs(self) -> None:
+        target = validate_target("192.168.0.1-192.168.0.150", confirm_large_scan=False)
+
+        self.assertEqual(target.nmap_target, "192.168.0.1-192.168.0.150")
+        self.assertEqual(target.host_count, 150)
+        self.assertEqual(
+            target.command_targets(),
+            (
+                "192.168.0.1/32",
+                "192.168.0.2/31",
+                "192.168.0.4/30",
+                "192.168.0.8/29",
+                "192.168.0.16/28",
+                "192.168.0.32/27",
+                "192.168.0.64/26",
+                "192.168.0.128/28",
+                "192.168.0.144/30",
+                "192.168.0.148/31",
+                "192.168.0.150/32",
+            ),
+        )
+
+    def test_validate_target_converts_any_private_ipv4_range_to_nmap_safe_cidrs(self) -> None:
+        target = validate_target("10.10.1.250-10.10.2.5", confirm_large_scan=False)
+
+        self.assertEqual(target.nmap_target, "10.10.1.250-10.10.2.5")
+        self.assertEqual(target.host_count, 12)
+        self.assertEqual(
+            target.command_targets(),
+            (
+                "10.10.1.250/31",
+                "10.10.1.252/30",
+                "10.10.2.0/30",
+                "10.10.2.4/31",
+            ),
+        )
+
+    def test_validate_target_converts_private_ipv6_range_to_nmap_safe_cidrs(self) -> None:
+        target = validate_target("fd00::1-fd00::4", confirm_large_scan=False)
+
+        self.assertEqual(target.nmap_target, "fd00::1-fd00::4")
+        self.assertEqual(target.host_count, 4)
+        self.assertEqual(
+            target.command_targets(),
+            (
+                "fd00::1/128",
+                "fd00::2/127",
+                "fd00::4/128",
+            ),
+        )
+
+    def test_validate_target_rejects_ranges_that_cross_public_space(self) -> None:
+        with self.assertRaises(ValueError) as exc:
+            validate_target("192.168.255.250-192.169.0.10", confirm_large_scan=True)
+
+        self.assertIn("Public IP scanning is blocked", str(exc.exception))
+
     def test_ping_scan_timeout_scales_for_subnet_targets(self) -> None:
         timeout_seconds = discovery_process_timeout_seconds(
             DiscoveryTarget(nmap_target="10.30.20.0/24", host_count=256),
@@ -50,6 +108,24 @@ class DiscoveryScannerTests(unittest.TestCase):
         self.assertIn("-T3", command)
         self.assertIn("--host-timeout", command)
         self.assertIn("12s", command)
+
+    @patch("app.core.capabilities.shutil.which", return_value="/usr/bin/nmap")
+    @patch("app.services.discovery.scanner.subprocess.run")
+    def test_run_nmap_scan_passes_range_cidrs_as_separate_targets(self, mock_run, _mock_which) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="<nmaprun></nmaprun>",
+            stderr="",
+        )
+        target = validate_target("192.168.0.1-192.168.0.3", confirm_large_scan=False)
+
+        run_nmap_scan(target, "ping")
+
+        command = mock_run.call_args.args[0]
+        self.assertIn("192.168.0.1/32", command)
+        self.assertIn("192.168.0.2/31", command)
+        self.assertNotIn("192.168.0.1-192.168.0.3", command)
 
     @patch("app.core.capabilities.shutil.which", return_value="/usr/bin/nmap")
     @patch("app.services.discovery.scanner.subprocess.run")

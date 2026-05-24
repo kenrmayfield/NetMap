@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ipaddress
+from bisect import bisect_left, bisect_right
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -32,11 +34,37 @@ from app.schemas.ipam import (
     VlanSuggestion,
 )
 from app.services.ipam.dhcp_parser import auto_parse
-from app.services.ipam.subnet_utils import detect_conflicts, enumerate_addresses, subnet_utilization
+from app.services.ipam.subnet_utils import detect_conflicts, enumerate_addresses
 
 router = APIRouter(prefix="/ipam", tags=["ipam"])
 
 _WRITE_ROLES = ("SuperAdmin", "NetworkAdmin")
+
+
+@dataclass(frozen=True)
+class _IpIndex:
+    ips: frozenset
+    v4: tuple[int, ...]
+    v6: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _IpamIndexes:
+    devices: _IpIndex
+    dhcp: _IpIndex
+    reservations: _IpIndex
+    used: _IpIndex
+
+
+@dataclass(frozen=True)
+class _SubnetStats:
+    total_hosts: int
+    used: int
+    free: int
+    utilization: float
+    device_count: int
+    dhcp_count: int
+    reservation_count: int
 
 
 def _require_write(user: User) -> None:
@@ -63,9 +91,72 @@ def _parse_ip_set(ips: set[str]) -> frozenset:
     for ip in ips:
         try:
             result.add(ipaddress.ip_address(ip))
-        except ValueError:
+        except (TypeError, ValueError):
             pass
     return frozenset(result)
+
+
+def _build_ip_index(ips: set[str] | frozenset) -> _IpIndex:
+    parsed = ips if isinstance(ips, frozenset) else _parse_ip_set(ips)
+    return _IpIndex(
+        ips=parsed,
+        v4=tuple(sorted(int(ip) for ip in parsed if ip.version == 4)),
+        v6=tuple(sorted(int(ip) for ip in parsed if ip.version == 6)),
+    )
+
+
+def _build_ipam_indexes(device_ips: set[str], dhcp_ips: set[str], reserved_ips: set[str]) -> _IpamIndexes:
+    device_index = _build_ip_index(device_ips)
+    dhcp_index = _build_ip_index(dhcp_ips)
+    reservation_index = _build_ip_index(reserved_ips)
+    return _IpamIndexes(
+        devices=device_index,
+        dhcp=dhcp_index,
+        reservations=reservation_index,
+        used=_build_ip_index(device_index.ips | dhcp_index.ips | reservation_index.ips),
+    )
+
+
+def _count_index_in_usable_range(index: _IpIndex, net: ipaddress.IPv4Network | ipaddress.IPv6Network) -> int:
+    start = int(net.network_address) + 1
+    end = int(net.broadcast_address) - 1
+    if end < start:
+        return 0
+    values = index.v4 if net.version == 4 else index.v6
+    return bisect_right(values, end) - bisect_left(values, start)
+
+
+def _subnet_stats_from_indexes(subnet: Subnet, indexes: _IpamIndexes) -> _SubnetStats:
+    try:
+        net = ipaddress.ip_network(subnet.cidr, strict=False)
+    except ValueError:
+        return _SubnetStats(0, 0, 0, 0.0, 0, 0, 0)
+
+    total = max(net.num_addresses - 2, 0)
+    used = _count_index_in_usable_range(indexes.used, net)
+    if subnet.gateway:
+        try:
+            gateway = ipaddress.ip_address(subnet.gateway)
+        except ValueError:
+            gateway = None
+        if (
+            gateway is not None
+            and gateway.version == net.version
+            and gateway in net
+            and gateway not in (net.network_address, net.broadcast_address)
+            and gateway not in indexes.used.ips
+        ):
+            used += 1
+
+    return _SubnetStats(
+        total_hosts=total,
+        used=used,
+        free=total - used,
+        utilization=used / total if total > 0 else 0.0,
+        device_count=_count_index_in_usable_range(indexes.devices, net),
+        dhcp_count=_count_index_in_usable_range(indexes.dhcp, net),
+        reservation_count=_count_index_in_usable_range(indexes.reservations, net),
+    )
 
 
 def _enrich_subnet(
@@ -76,23 +167,19 @@ def _enrich_subnet(
     _parsed_device: frozenset | None = None,
     _parsed_dhcp: frozenset | None = None,
     _parsed_res: frozenset | None = None,
+    _indexes: _IpamIndexes | None = None,
 ) -> SubnetOut:
-    stats = subnet_utilization(subnet.cidr, device_ips, dhcp_ips, subnet.gateway, reserved_ips or set())
     out = SubnetOut.model_validate(subnet)
-    out.total_hosts = stats["total_hosts"]
-    out.used = stats["used"]
-    out.free = stats["free"]
-    out.utilization = stats["utilization"]
-    try:
-        net = ipaddress.ip_network(subnet.cidr, strict=False)
-        d = _parsed_device if _parsed_device is not None else _parse_ip_set(device_ips)
-        h = _parsed_dhcp if _parsed_dhcp is not None else _parse_ip_set(dhcp_ips)
-        r = _parsed_res if _parsed_res is not None else _parse_ip_set(reserved_ips or set())
-        out.device_count = sum(1 for addr in d if addr in net)
-        out.dhcp_count = sum(1 for addr in h if addr in net)
-        out.reservation_count = sum(1 for addr in r if addr in net)
-    except ValueError:
-        pass
+    if _indexes is None:
+        _indexes = _build_ipam_indexes(device_ips, dhcp_ips, reserved_ips or set())
+    stats = _subnet_stats_from_indexes(subnet, _indexes)
+    out.total_hosts = stats.total_hosts
+    out.used = stats.used
+    out.free = stats.free
+    out.utilization = stats.utilization
+    out.device_count = stats.device_count
+    out.dhcp_count = stats.dhcp_count
+    out.reservation_count = stats.reservation_count
     return out
 
 
@@ -145,13 +232,14 @@ def ipam_summary(
     device_ips = {row.ip_address for row in devices}
     dhcp_ips = _dhcp_ips(db)
     res_ips = _reserved_ips(db)
+    indexes = _build_ipam_indexes(device_ips, dhcp_ips, res_ips)
 
     total_hosts = used = free = 0
     for s in subnets:
-        stats = subnet_utilization(s.cidr, device_ips, dhcp_ips, s.gateway, res_ips)
-        total_hosts += stats["total_hosts"]
-        used += stats["used"]
-        free += stats["free"]
+        stats = _subnet_stats_from_indexes(s, indexes)
+        total_hosts += stats.total_hosts
+        used += stats.used
+        free += stats.free
 
     subnet_rows = [(s.id, s.cidr, s.name) for s in subnets]
     device_rows = [(row.id, row.ip_address, row.display_name or row.hostname or row.ip_address) for row in devices]
@@ -185,10 +273,8 @@ def list_subnets(
     device_ips = _device_ips(db)
     dhcp_ips = _dhcp_ips(db)
     res_ips = _reserved_ips(db)
-    parsed_device = _parse_ip_set(device_ips)
-    parsed_dhcp = _parse_ip_set(dhcp_ips)
-    parsed_res = _parse_ip_set(res_ips)
-    return [_enrich_subnet(s, device_ips, dhcp_ips, res_ips, parsed_device, parsed_dhcp, parsed_res) for s in subnets]
+    indexes = _build_ipam_indexes(device_ips, dhcp_ips, res_ips)
+    return [_enrich_subnet(s, device_ips, dhcp_ips, res_ips, _indexes=indexes) for s in subnets]
 
 
 @router.post("/subnets", response_model=SubnetOut, status_code=201)
