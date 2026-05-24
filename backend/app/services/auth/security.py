@@ -22,9 +22,10 @@ def is_locked(db: Session, subjects: list[str]) -> tuple[bool, int]:
     longest_wait = 0
     for subject in subjects:
         state = db.scalar(select(LoginThrottleState).where(LoginThrottleState.subject == subject))
-        if state is None or state.locked_until is None or state.locked_until <= now:
+        locked_until = _as_aware_utc(state.locked_until) if state and state.locked_until else None
+        if state is None or locked_until is None or locked_until <= now:
             continue
-        wait_seconds = int((state.locked_until - now).total_seconds())
+        wait_seconds = int((locked_until - now).total_seconds())
         if wait_seconds > longest_wait:
             longest_wait = wait_seconds
     return longest_wait > 0, longest_wait
@@ -61,12 +62,27 @@ def clear_login_failures(db: Session, subjects: list[str]) -> None:
         state.updated_at = now
 
 
+def clear_user_login_lockout(db: Session, username: str) -> bool:
+    subject = f"user:{username.lower()}"
+    state = db.scalar(select(LoginThrottleState).where(LoginThrottleState.subject == subject))
+    if state is None:
+        return False
+    clear_login_failures(db, [subject])
+    return True
+
+
 def apply_progressive_delay(attempts: int) -> None:
     step_seconds = settings.auth_progressive_delay_seconds
     if step_seconds <= 0:
         return
     delay_seconds = min(float(attempts) * float(step_seconds), 8.0)
     sleep(delay_seconds)
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 _RESET_MAX_ATTEMPTS = 5
@@ -80,7 +96,7 @@ def _check_reset_rate_limit(db: Session, ip_address: str | None) -> bool:
     subject = f"reset:ip:{ip_address}"
     now = datetime.now(timezone.utc)
     state = db.scalar(select(LoginThrottleState).where(LoginThrottleState.subject == subject))
-    if state and state.locked_until and state.locked_until > now:
+    if state and state.locked_until and _as_aware_utc(state.locked_until) > now:
         return True
     if state is None:
         state = LoginThrottleState(subject=subject, failed_attempts=0)

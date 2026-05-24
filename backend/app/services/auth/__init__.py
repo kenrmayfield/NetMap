@@ -3,6 +3,7 @@
 from app.services.auth.security import (
     apply_progressive_delay,
     clear_login_failures,
+    clear_user_login_lockout,
     is_locked,
     record_login_failure,
     throttle_subjects,
@@ -16,6 +17,7 @@ from app.services.auth.tokens import (
 __all__ = [
     "apply_progressive_delay",
     "clear_login_failures",
+    "clear_user_login_lockout",
     "is_locked",
     "record_login_failure",
     "register_refresh_token",

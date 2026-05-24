@@ -44,6 +44,7 @@ Everything runs in a single container. The web UI, API, database, and syslog rec
 - [Configuration reference](#️-configuration-reference)
 - [Ports](#-ports)
 - [Upgrading](#-upgrading)
+- [Account lockout recovery](#-account-lockout-recovery)
 - [Reverse proxy setup](#-reverse-proxy-setup)
 - [Firewall syslog ingestion](#-firewall-syslog-ingestion)
 - [Alert notifications](#-alert-notifications)
@@ -369,6 +370,29 @@ cp -r /opt/netmap/data /opt/netmap/data.bak-$(date +%Y%m%d)
 ```
 
 NetMap also has a built-in backup tool under Admin → Database that exports the full database to a downloadable file.
+
+---
+
+## 🔓 Account lockout recovery
+
+If a SuperAdmin account is locked out after too many failed login attempts, the in-app unlock button (Admin → Users → Unlock) requires an active admin session and cannot be used while locked. Recovery is done directly against the database from the Docker host.
+
+Run this on the machine running the container (replace `netmap` with your container name if you changed it):
+
+```bash
+docker exec netmap python3 -c "
+import sqlite3
+conn = sqlite3.connect('/app/data/netmap.db')
+conn.execute(\"UPDATE login_throttle_state SET failed_attempts=0, locked_until=NULL WHERE subject LIKE 'user:%'\")
+conn.commit()
+conn.close()
+print('Done.')
+"
+```
+
+This clears the lockout for all users. To target a specific account, replace `LIKE 'user:%'` with `= 'user:yourusername'` (the username is always stored lowercase in the lockout table).
+
+> **Note:** Restarting the container does not clear lockouts — they are persisted in the database by design.
 
 ---
 

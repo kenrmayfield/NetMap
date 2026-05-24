@@ -50,6 +50,7 @@ For safer deployments:
 - Frontend auth tokens are no longer persisted in `localStorage`.
 - XLSX import support was removed to avoid the vulnerable `xlsx` dependency.
 - SVG icon imports are sanitized with DOMPurify before rendering.
+- Repeated failed logins trigger a per-account lockout (default: 5 attempts, 15-minute window). Locked accounts can be unlocked by a SuperAdmin via Admin → Users, or via direct database access using `docker exec` if the SuperAdmin account itself is locked — see [Account lockout recovery](README.md#-account-lockout-recovery) in the README.
 - Nmap discovery blocks public IP targets and caps scan size.
 - Active ping, traceroute, and TCP tools block public targets by default.
 - Container defaults drop Linux capabilities and add only `NET_RAW`.

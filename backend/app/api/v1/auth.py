@@ -39,6 +39,7 @@ from app.schemas.auth import (
 from app.services.auth import (
     apply_progressive_delay,
     clear_login_failures,
+    clear_user_login_lockout,
     is_locked,
     record_login_failure,
     register_refresh_token,
@@ -403,6 +404,27 @@ def update_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/auth/users/{user_id}/unlock-login", status_code=status.HTTP_204_NO_CONTENT)
+def unlock_user_login(
+    user_id: int,
+    current_user: Annotated[User, Depends(require_super_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    cleared = clear_user_login_lockout(db, user.username)
+    write_audit(
+        db,
+        action="auth.user_login_unlocked",
+        actor_user_id=current_user.id,
+        target=f"user:{user.username}",
+        detail=f"cleared={cleared}",
+    )
+    db.commit()
 
 
 @router.post("/auth/users/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
