@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from math import isfinite
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -240,6 +241,12 @@ class LayoutPosition(BaseModel):
     x: float
     y: float
 
+    @model_validator(mode="after")
+    def finite_coordinates(self) -> "LayoutPosition":
+        if not isfinite(self.x) or not isfinite(self.y):
+            raise ValueError("Layout coordinates must be finite numbers")
+        return self
+
 
 class TopologyLayoutBase(BaseModel):
     name: str = Field(min_length=1, max_length=80)
@@ -276,8 +283,8 @@ def normalize_layout_positions(
     normalized: dict[str, LayoutPosition] = {}
     for key, value in positions.items():
         node_id = key.strip()
-        if not node_id.startswith("device-"):
-            raise ValueError("Layout positions must only reference device nodes")
+        if not (node_id.startswith("device-") or node_id.startswith("group-")):
+            raise ValueError("Layout positions must only reference topology nodes")
         normalized[node_id] = value
     return normalized
 

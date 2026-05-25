@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import json
+from math import isfinite
 import socket
 import time
 from typing import Annotated
@@ -962,11 +963,20 @@ def deserialize_layout_positions(raw_positions: str) -> dict:
         return {}
     if not isinstance(value, dict):
         return {}
-    return {
-        str(key): position
-        for key, position in value.items()
-        if isinstance(position, dict)
-    }
+    positions: dict[str, dict[str, float]] = {}
+    for key, position in value.items():
+        node_id = str(key).strip()
+        if not (node_id.startswith("device-") or node_id.startswith("group-")) or not isinstance(position, dict):
+            continue
+        try:
+            x = float(position["x"])
+            y = float(position["y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not isfinite(x) or not isfinite(y):
+            continue
+        positions[node_id] = {"x": x, "y": y}
+    return positions
 
 
 def serialize_layout_positions(positions: dict) -> dict:

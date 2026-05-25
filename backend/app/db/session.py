@@ -117,6 +117,7 @@ def apply_sqlite_schema_updates() -> None:
         _run_migration(conn, inspector, "0025_topology_group_dhcp_range", _migrate_topology_group_dhcp_range)
         _run_migration(conn, inspector, "0026_backend_hot_path_indexes", _migrate_backend_hot_path_indexes)
         _run_migration(conn, inspector, "0027_user_device_favourites", _migrate_user_device_favourites)
+        _run_migration(conn, inspector, "0028_topology_layouts", _migrate_topology_layouts)
 
 
 def _run_migration(conn, inspector, name: str, fn) -> None:
@@ -630,3 +631,23 @@ def _migrate_user_device_favourites(conn, inspector) -> None:
             "CREATE INDEX IF NOT EXISTS ix_user_device_favourites_user_id "
             "ON user_device_favourites (user_id)"
         ))
+
+
+def _migrate_topology_layouts(conn, inspector) -> None:
+    tables = set(inspector.get_table_names())
+    if "topology_layouts" not in tables:
+        conn.execute(text(
+            """
+            CREATE TABLE topology_layouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_user_id INTEGER NOT NULL REFERENCES users(id),
+                name VARCHAR(80) NOT NULL,
+                positions_json TEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE (owner_user_id, name)
+            )
+            """
+        ))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_layouts_id ON topology_layouts (id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_layouts_owner_user_id ON topology_layouts (owner_user_id)"))
