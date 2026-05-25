@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Topology
+- Fixed per-user topology layout persistence for public Docker image upgrades: saved layouts now accept both device positions and group anchors, invalid saved coordinates are ignored instead of breaking the topology page, and migration `0028_topology_layouts` ensures the layout table exists on upgraded SQLite installs.
+
+### Admin
+- Added SuperAdmin login-lockout unlock controls for user accounts.
+- Added a System diagnostics panel in Admin with database sizes, WAL sizes, monitoring cache/status data, syslog retention details, process PID, and manual refresh.
+
+### Backend / Performance
+- Discovery scans now support private IPv4 and IPv6 `start-end` ranges by converting validated ranges to nmap-safe CIDR targets while preserving the displayed input.
+- IPAM subnet utilization now uses per-request numeric IP indexes and binary-search counts instead of repeatedly scanning all known IPs per subnet.
+- Firewall `raw_log` search now uses SQLite FTS5 with startup-created sync triggers and existing-row rebuild support.
+- Added SuperAdmin-only `/api/v1/system/diagnostics` for lightweight runtime diagnostics.
+
+### Docker / Runtime
+- Moved the AIO image entrypoint to `/usr/local/bin/netmap-aio-entrypoint` and nginx template to `/etc/netmap/aio-nginx.conf.template`; the image build now verifies both files exist to prevent startup failures from a missing `/app/docker/aio-entrypoint.sh`.
+
+### Security / Session
+- Logout and idle cleanup can revoke sessions via the refresh cookie without requiring a still-valid access token.
+- CSRF cleanup clears the root-path cookie used by the SPA.
+
+### Network Tools
+- Bounded DNS, ping, traceroute, hostname resolution, and active tool subprocess timeouts to avoid tying up backend workers.
+- Hardened ping/traceroute subprocess invocation for CodeQL: targets are resolved to normalized IP arguments, option-like values are rejected at the subprocess boundary, and `--` is inserted before the target.
+
+---
+
 ## [1.1.0] - 2026-05-23
 
 ### Inventory

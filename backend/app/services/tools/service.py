@@ -41,6 +41,7 @@ DNS_RESOLVER_TIMEOUT_SECONDS = 2.0
 HOST_RESOLUTION_TIMEOUT_SECONDS = 3.0
 MAX_PING_PROCESS_TIMEOUT_SECONDS = 45
 MAX_TRACEROUTE_PROCESS_TIMEOUT_SECONDS = 180
+TOOL_TARGET_ARGUMENT_RE = re.compile(r"^[A-Za-z0-9:._-]+$")
 PRIVATE_ACTIVE_TARGET_NETWORKS = [
     ip_network("10.0.0.0/8"),
     ip_network("172.16.0.0/12"),
@@ -119,13 +120,15 @@ def reverse_dns(payload: ReverseDnsRequest) -> ReverseDnsResult:
 
 def ping_host(payload: PingRequest, *, allow_public_targets: bool | None = None) -> PingResult:
     ensure_active_target_allowed(payload.host, allow_public_targets=allow_public_targets)
+    host_arg = _active_tool_target_ip_argument(payload.host)
     command = [
         "ping",
         "-c",
         str(payload.count),
         "-W",
         str(payload.timeout_seconds),
-        payload.host,
+        "--",
+        host_arg,
     ]
     started = time.perf_counter()
     process_timeout = min(MAX_PING_PROCESS_TIMEOUT_SECONDS, payload.timeout_seconds + 3)
@@ -153,6 +156,7 @@ def traceroute_host(payload: TracerouteRequest, *, allow_public_targets: bool | 
     ensure_active_target_allowed(payload.host, allow_public_targets=allow_public_targets)
     if shutil.which("traceroute") is None:
         raise FileNotFoundError("traceroute")
+    host_arg = _active_tool_target_ip_argument(payload.host)
     command = [
         "traceroute",
         "-n",
@@ -160,7 +164,8 @@ def traceroute_host(payload: TracerouteRequest, *, allow_public_targets: bool | 
         str(payload.max_hops),
         "-w",
         str(payload.timeout_seconds),
-        payload.host,
+        "--",
+        host_arg,
     ]
     started = time.perf_counter()
     process_timeout = min(
@@ -275,6 +280,33 @@ def _run_tool_command(
         return subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
         raise TimeoutError(f"{timeout_label} timed out after {timeout_seconds:g} seconds") from exc
+
+
+def _safe_tool_target_argument(host: str) -> str:
+    if host.startswith("-") or not TOOL_TARGET_ARGUMENT_RE.fullmatch(host):
+        raise ValueError("Invalid active tool target")
+    return host
+
+
+def _active_tool_target_ip_argument(host: str) -> str:
+    try:
+        return _safe_tool_target_argument(str(ip_address(host)))
+    except ValueError:
+        pass
+
+    try:
+        infos = _resolve_host(host)
+    except socket.gaierror as exc:
+        raise ValueError(f"Unable to resolve target host: {host}") from exc
+    except TimeoutError as exc:
+        raise ValueError(f"Timed out resolving target host: {host}") from exc
+
+    for info in infos:
+        try:
+            return _safe_tool_target_argument(str(ip_address(info[4][0])))
+        except (IndexError, ValueError):
+            continue
+    raise ValueError(f"Unable to resolve target host: {host}")
 
 
 def _resolve_host(host: str):
