@@ -13,7 +13,7 @@ import {
   groupId, buildDiagramLayout,
   savedTopologyLayoutKey, readTopologyDisplayPrefs, writeTopologyDisplayPrefs,
   readSavedTopologyLayout, clearSavedTopologyLayout,
-  persistCurrentTopologyLayout, collectCurrentTopologyLayoutPositions,
+  persistCurrentTopologyLayout, collectCurrentTopologyLayoutPositions, sanitizeTopologyLayoutPositions,
 } from "../../utils/topology";
 import { compareGroupLabels } from "../../utils/sort";
 import { deviceLabel, statusColor } from "../../utils/format";
@@ -126,8 +126,10 @@ export function TopologyWorkspace({
     if (!accessToken) return;
     if (layoutSaveTimerRef.current) clearTimeout(layoutSaveTimerRef.current);
     const token = accessToken;
+    const sanitizedPositions = sanitizeTopologyLayoutPositions(positions);
+    if (Object.keys(sanitizedPositions).length === 0) return;
     layoutSaveTimerRef.current = setTimeout(() => {
-      void api.saveTopologyLayout(token, { name: "__autosave__", positions });
+      void api.saveTopologyLayout(token, { name: "__autosave__", positions: sanitizedPositions });
     }, 2000);
   };
 
@@ -188,8 +190,9 @@ export function TopologyWorkspace({
           if (Object.keys(layoutPositionsRef.current).length === 0) {
             const autosave = layouts.find((l) => l.name === "__autosave__");
             if (autosave) {
-              layoutPositionsRef.current = { ...autosave.positions };
-              window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(autosave.positions));
+              const autosavePositions = sanitizeTopologyLayoutPositions(autosave.positions);
+              layoutPositionsRef.current = autosavePositions;
+              window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(autosavePositions));
               fitOnNextRenderRef.current = true;
               setLayoutRevision((c) => c + 1);
             }
@@ -1141,10 +1144,10 @@ export function TopologyWorkspace({
       setTopologyError("Layout name is required");
       return;
     }
-    const positions = {
+    const positions = sanitizeTopologyLayoutPositions({
       ...layoutPositionsRef.current,
       ...collectCurrentTopologyLayoutPositions(cyRef.current),
-    };
+    });
     if (Object.keys(positions).length === 0) {
       setTopologyError("No topology nodes are available to save");
       return;
@@ -1163,8 +1166,9 @@ export function TopologyWorkspace({
   }
 
   function loadSavedLayout(layout: TopologyLayout) {
-    layoutPositionsRef.current = { ...layout.positions };
-    window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(layout.positions));
+    const positions = sanitizeTopologyLayoutPositions(layout.positions);
+    layoutPositionsRef.current = positions;
+    window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(positions));
     fitOnNextRenderRef.current = true;
     setActiveSavedLayoutId(layout.id);
     setLayoutRevision((current) => current + 1);
@@ -1290,9 +1294,10 @@ export function TopologyWorkspace({
       if (node.length > 0) node.position({ x, y });
       nextPositions[id] = { x, y };
     }
-    layoutPositionsRef.current = nextPositions;
-    window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(nextPositions));
-    serverSaveLayoutRef.current(nextPositions);
+    const sanitizedPositions = sanitizeTopologyLayoutPositions(nextPositions);
+    layoutPositionsRef.current = sanitizedPositions;
+    window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(sanitizedPositions));
+    serverSaveLayoutRef.current(sanitizedPositions);
     refreshOverlayNodes();
   }
 
@@ -1330,9 +1335,10 @@ export function TopologyWorkspace({
     for (const device of groupDevices) {
       delete nextPositions[`device-${device.id}`];
     }
-    layoutPositionsRef.current = nextPositions;
-    window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(nextPositions));
-    serverSaveLayoutRef.current(nextPositions);
+    const sanitizedPositions = sanitizeTopologyLayoutPositions(nextPositions);
+    layoutPositionsRef.current = sanitizedPositions;
+    window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(sanitizedPositions));
+    serverSaveLayoutRef.current(sanitizedPositions);
     skipPersistOnNextRenderRef.current = true;
     setLayoutRevision((c) => c + 1);
   }
@@ -1625,7 +1631,7 @@ export function TopologyWorkspace({
                         filteredGraph.devices
                           .filter((d) => d.topology_group === selectedGroupForDisplay)
                           .forEach((d) => { delete nextPositions[`device-${d.id}`]; });
-                        layoutPositionsRef.current = nextPositions;
+                        layoutPositionsRef.current = sanitizeTopologyLayoutPositions(nextPositions);
                         skipPersistOnNextRenderRef.current = true;
                         setGroupDisplayPrefs((c) => ({ ...c, [selectedGroupForDisplay]: { ...activeGroupDisplay, spacingScalePercent: Number(e.target.value) } }));
                       }} />
@@ -1653,7 +1659,7 @@ export function TopologyWorkspace({
                         filteredGraph.devices
                           .filter((d) => d.topology_group === selectedGroupForDisplay)
                           .forEach((d) => { delete nextPositions[`device-${d.id}`]; });
-                        layoutPositionsRef.current = nextPositions;
+                        layoutPositionsRef.current = sanitizeTopologyLayoutPositions(nextPositions);
                         skipPersistOnNextRenderRef.current = true;
                         setGroupDisplayPrefs((c) => ({ ...c, [selectedGroupForDisplay]: { ...activeGroupDisplay, maxDevicesPerRow: Number(e.target.value) } }));
                       }} />

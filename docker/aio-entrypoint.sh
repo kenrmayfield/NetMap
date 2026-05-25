@@ -14,7 +14,7 @@ chown -R netmap:netmap /app/data
 mkdir -p /tmp/nginx/client_body /tmp/nginx/proxy /tmp/nginx/fastcgi /tmp/nginx/uwsgi /tmp/nginx/scgi
 chown -R netmap:netmap /tmp/nginx
 
-envsubst '${APP_PORT}' < /app/docker/aio-nginx.conf.template > /tmp/nginx.generated.conf
+envsubst '${APP_PORT}' < /etc/netmap/aio-nginx.conf.template > /tmp/nginx.generated.conf
 
 gosu netmap uvicorn app.main:app \
   --uds /tmp/uvicorn.sock \

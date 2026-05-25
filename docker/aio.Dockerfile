@@ -59,12 +59,14 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY backend/app ./app
 COPY VERSION /app/VERSION
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
-COPY docker/aio-nginx.conf.template /app/docker/aio-nginx.conf.template
-COPY docker/aio-entrypoint.sh /app/docker/aio-entrypoint.sh
+COPY docker/aio-nginx.conf.template /etc/netmap/aio-nginx.conf.template
+COPY docker/aio-entrypoint.sh /usr/local/bin/netmap-aio-entrypoint
 
 RUN mkdir -p /app/data /tmp/nginx \
   && chown -R netmap:netmap /app /tmp/nginx /usr/share/nginx/html \
-  && chmod +x /app/docker/aio-entrypoint.sh
+  && chmod +x /usr/local/bin/netmap-aio-entrypoint \
+  && test -x /usr/local/bin/netmap-aio-entrypoint \
+  && test -f /etc/netmap/aio-nginx.conf.template
 
 EXPOSE 8080 1514/tcp 1514/udp
 VOLUME ["/app/data"]
@@ -72,4 +74,4 @@ VOLUME ["/app/data"]
 HEALTHCHECK --interval=20s --timeout=5s --retries=3 --start-period=15s \
   CMD sh -c 'python3 -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:${APP_PORT}/api/health\", timeout=5)"'
 
-ENTRYPOINT ["tini", "--", "/app/docker/aio-entrypoint.sh"]
+ENTRYPOINT ["tini", "--", "/usr/local/bin/netmap-aio-entrypoint"]

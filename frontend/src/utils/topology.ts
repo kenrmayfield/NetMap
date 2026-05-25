@@ -190,7 +190,7 @@ export function readSavedTopologyLayout(userId: number) {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw) as Record<string, { x: number; y: number }>;
-    return parsed ?? {};
+    return sanitizeTopologyLayoutPositions(parsed ?? {});
   } catch {
     window.localStorage.removeItem(savedTopologyLayoutKey(userId));
     return {};
@@ -205,9 +205,28 @@ export function collectCurrentTopologyLayoutPositions(cy: Core | null) {
   const visiblePositions: Record<string, { x: number; y: number }> = {};
   if (!cy) return visiblePositions;
   cy.$("node.device").forEach((node) => {
-    visiblePositions[node.id()] = { ...node.position() };
+    const position = node.position();
+    if (isFiniteLayoutPosition(position)) {
+      visiblePositions[node.id()] = { x: position.x, y: position.y };
+    }
   });
   return visiblePositions;
+}
+
+export function isFiniteLayoutPosition(position: { x: number; y: number } | undefined) {
+  return Boolean(position && Number.isFinite(position.x) && Number.isFinite(position.y));
+}
+
+export function sanitizeTopologyLayoutPositions(
+  positions: Record<string, { x: number; y: number }>,
+) {
+  const sanitized: Record<string, { x: number; y: number }> = {};
+  Object.entries(positions).forEach(([id, position]) => {
+    if ((id.startsWith("device-") || id.startsWith("group-")) && isFiniteLayoutPosition(position)) {
+      sanitized[id] = { x: position.x, y: position.y };
+    }
+  });
+  return sanitized;
 }
 
 export function persistCurrentTopologyLayout(
@@ -218,7 +237,6 @@ export function persistCurrentTopologyLayout(
   if (!cy) return;
   const visiblePositions = collectCurrentTopologyLayoutPositions(cy);
   if (Object.keys(visiblePositions).length === 0) return;
-  layoutPositionsRef.current = { ...layoutPositionsRef.current, ...visiblePositions };
+  layoutPositionsRef.current = sanitizeTopologyLayoutPositions({ ...layoutPositionsRef.current, ...visiblePositions });
   window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(layoutPositionsRef.current));
 }
-

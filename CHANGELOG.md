@@ -2,17 +2,22 @@
 
 ## [Unreleased]
 
+---
+
+## [1.2.1] - 2026-05-25
+
 ### Topology
-- Fixed per-user topology layout persistence for public Docker image upgrades: saved layouts now accept both device positions and group anchors, invalid saved coordinates are ignored instead of breaking the topology page, and migration `0028_topology_layouts` ensures the layout table exists on upgraded SQLite installs.
+- Saved topology layouts now persist reliably per user after Docker image upgrades.
+- Group anchor positions are preserved with device positions, and invalid saved coordinates are ignored instead of breaking the topology page.
 
 ### Docker / Runtime
-- Moved the AIO image entrypoint to `/usr/local/bin/netmap-aio-entrypoint` and nginx template to `/etc/netmap/aio-nginx.conf.template`; the image build now verifies both files exist to prevent startup failures from a missing `/app/docker/aio-entrypoint.sh`.
+- AIO image startup files now install to fixed runtime paths and are verified during the image build to prevent missing-entrypoint startup failures.
 
 ### Security / Session
-- Notification delivery failures no longer expose upstream HTTP bodies, exception details, stack trace fragments, or server-side paths in API responses; detailed diagnostics are logged server-side only.
+- Notification delivery failures now return sanitized messages to the UI while detailed diagnostics stay in server logs.
 
 ### Network Tools
-- Hardened ping/traceroute subprocess invocation for CodeQL: targets are resolved to normalized IP arguments, option-like values are rejected at the subprocess boundary, and `--` is inserted before the target.
+- Ping and traceroute target handling now resolves hostnames before execution and passes normalized targets safely to subprocesses.
 
 ---
 
@@ -37,6 +42,9 @@
 - IPAM subnet utilization now uses per-request numeric IP indexes and binary-search counts instead of repeatedly scanning all known IPs per subnet.
 - Firewall `raw_log` search now uses SQLite FTS5 with startup-created sync triggers and existing-row rebuild support.
 - Added SuperAdmin-only `/api/v1/system/diagnostics` for lightweight runtime diagnostics.
+
+### Docker / Runtime
+- Moved the AIO image entrypoint to `/usr/local/bin/netmap-aio-entrypoint` and nginx template to `/etc/netmap/aio-nginx.conf.template`; the image build now verifies both files exist to prevent startup failures from a missing `/app/docker/aio-entrypoint.sh`.
 
 ### Security / Session
 - Logout and idle cleanup can revoke sessions via the refresh cookie without requiring a still-valid access token.
