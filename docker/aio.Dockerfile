@@ -65,7 +65,10 @@ COPY docker/aio-entrypoint.sh /usr/local/bin/netmap-aio-entrypoint
 RUN mkdir -p /app/data /tmp/nginx \
   && chown -R netmap:netmap /app /tmp/nginx /usr/share/nginx/html \
   && chmod +x /usr/local/bin/netmap-aio-entrypoint \
+  && mkdir -p /app/docker \
+  && ln -sf /usr/local/bin/netmap-aio-entrypoint /app/docker/aio-entrypoint.sh \
   && test -x /usr/local/bin/netmap-aio-entrypoint \
+  && test -x /app/docker/aio-entrypoint.sh \
   && test -f /etc/netmap/aio-nginx.conf.template
 
 EXPOSE 8080 1514/tcp 1514/udp

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Generator
 
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import DatabaseError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _firewall_db_url() -> str:
@@ -56,6 +60,20 @@ def init_firewall_fts() -> None:
 
 
 def setup_firewall_fts(conn) -> None:
+    existed = _firewall_fts_exists(conn)
+    _create_firewall_fts_objects(conn)
+    try:
+        _sync_firewall_fts(conn, force_rebuild=not existed)
+    except DatabaseError as exc:
+        if not _is_malformed_fts_error(exc):
+            raise
+        logger.warning("Firewall FTS index is malformed; rebuilding derived search index", exc_info=True)
+        _drop_firewall_fts_objects(conn)
+        _create_firewall_fts_objects(conn)
+        _sync_firewall_fts(conn, force_rebuild=True)
+
+
+def _create_firewall_fts_objects(conn) -> None:
     conn.execute(
         text(
             """
@@ -99,7 +117,39 @@ def setup_firewall_fts(conn) -> None:
             """
         )
     )
+
+
+def _sync_firewall_fts(conn, *, force_rebuild: bool = False) -> None:
+    conn.execute(
+        text("SELECT rowid FROM firewall_events_fts WHERE firewall_events_fts MATCH :probe LIMIT 1"),
+        {"probe": "netmapftsprobe"},
+    ).fetchall()
     indexed = int(conn.execute(text("SELECT count(*) FROM firewall_events_fts")).scalar() or 0)
     events = int(conn.execute(text("SELECT count(*) FROM firewall_events")).scalar() or 0)
-    if indexed != events:
+    if force_rebuild or indexed != events:
         conn.execute(text("INSERT INTO firewall_events_fts(firewall_events_fts) VALUES ('rebuild')"))
+
+
+def _drop_firewall_fts_objects(conn) -> None:
+    conn.execute(text("DROP TRIGGER IF EXISTS firewall_events_ai"))
+    conn.execute(text("DROP TRIGGER IF EXISTS firewall_events_ad"))
+    conn.execute(text("DROP TRIGGER IF EXISTS firewall_events_au"))
+    conn.execute(text("DROP TABLE IF EXISTS firewall_events_fts"))
+    for table_name in (
+        "firewall_events_fts_data",
+        "firewall_events_fts_idx",
+        "firewall_events_fts_docsize",
+        "firewall_events_fts_config",
+    ):
+        conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+
+
+def _is_malformed_fts_error(exc: DatabaseError) -> bool:
+    return "database disk image is malformed" in str(exc).lower()
+
+
+def _firewall_fts_exists(conn) -> bool:
+    row = conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'firewall_events_fts'")
+    ).fetchone()
+    return row is not None

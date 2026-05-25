@@ -4,6 +4,16 @@
 
 ---
 
+## [1.2.2] - 2026-05-25
+
+### Docker / Runtime
+- Added a backwards-compatible AIO entrypoint path so containers still start when an environment references the previous `/app/docker/aio-entrypoint.sh` location.
+
+### Security / Session
+- Firewall raw-log search index startup now detects malformed FTS state and rebuilds the derived index instead of blocking application startup.
+
+---
+
 ## [1.2.1] - 2026-05-25
 
 ### Topology
