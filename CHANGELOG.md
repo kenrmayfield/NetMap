@@ -21,6 +21,7 @@
 ### Security / Session
 - Logout and idle cleanup can revoke sessions via the refresh cookie without requiring a still-valid access token.
 - CSRF cleanup clears the root-path cookie used by the SPA.
+- Notification delivery failures no longer expose upstream HTTP bodies, exception details, stack trace fragments, or server-side paths in API responses; detailed diagnostics are logged server-side only.
 
 ### Network Tools
 - Bounded DNS, ping, traceroute, hostname resolution, and active tool subprocess timeouts to avoid tying up backend workers.

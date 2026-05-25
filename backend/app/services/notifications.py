@@ -1,5 +1,6 @@
 import ipaddress
 import json
+import logging
 import smtplib
 import socket
 import ssl
@@ -10,6 +11,8 @@ from email.utils import formataddr
 from urllib.parse import urlparse, urlunparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 
 NOTIFICATION_DEFAULTS: dict[str, str] = {
@@ -145,10 +148,11 @@ def send_notification(channel: str, message: str, settings: dict[str, str]) -> s
             return _send_smtp(message, settings)
         return f"Unknown channel: {channel}"
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:200]
-        return f"HTTP {exc.code}: {body}"
+        logger.warning("Notification delivery failed for channel %s with HTTP %s", channel, exc.code, exc_info=True)
+        return f"HTTP {exc.code}: delivery failed"
     except Exception as exc:
-        return f"Error: {exc}"
+        logger.warning("Notification delivery failed for channel %s", channel, exc_info=True)
+        return "Error: delivery failed"
 
 
 def send_password_reset_email(
