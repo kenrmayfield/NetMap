@@ -3166,14 +3166,24 @@ body.route-locations .dash-layout {
   flex-direction: column;
   align-items: center;
   line-height: 1.2;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   color: #111111;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.92),
+    0 -1px 0 rgba(255, 255, 255, 0.92),
+    1px 0 0 rgba(255, 255, 255, 0.92),
+    -1px 0 0 rgba(255, 255, 255, 0.92);
   white-space: nowrap;
 }
 
 body.theme-dark .topology-overlay-label {
   color: #ffffff;
+  text-shadow:
+    0 1px 0 rgba(15, 25, 35, 0.95),
+    0 -1px 0 rgba(15, 25, 35, 0.95),
+    1px 0 0 rgba(15, 25, 35, 0.95),
+    -1px 0 0 rgba(15, 25, 35, 0.95);
 }
 
 .graph-surface:active {

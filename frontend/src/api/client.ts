@@ -126,6 +126,7 @@ export type LayoutPosition = {
 export type TopologyDisplayPrefs = {
   groupDisplayPrefs?: Record<string, { nodeScalePercent: number; spacingScalePercent: number; maxDevicesPerRow: number }>;
   edgeLabelFontSize?: number;
+  nodeLabelFontSize?: number;
   groupZoneOpacityPercent?: number;
   showGroupZoneBorders?: boolean;
   hiddenGroupNames?: string[];

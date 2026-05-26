@@ -13,7 +13,7 @@ import {
   groupId, buildDiagramLayout,
   savedTopologyLayoutKey, readTopologyDisplayPrefs, writeTopologyDisplayPrefs,
   readSavedTopologyLayout, clearSavedTopologyLayout,
-  readSavedTopologyLayoutMeta, writeSavedTopologyLayoutMeta,
+  writeSavedTopologyLayoutMeta,
   persistCurrentTopologyLayout, collectCurrentTopologyLayoutPositions, sanitizeTopologyLayoutPositions,
 } from "../../utils/topology";
 import { compareGroupLabels } from "../../utils/sort";
@@ -26,6 +26,9 @@ import { DeviceForm } from "../devices/DeviceForm";
 import { RelationshipDetails } from "./RelationshipDetails";
 import { RelationshipEditForm, RelationshipForm } from "./RelationshipForm";
 import { DiscoveryModal } from "./DiscoveryModal";
+
+const DEFAULT_NODE_LABEL_FONT_SIZE = 15;
+const DEFAULT_EDGE_LABEL_FONT_SIZE = 15;
 
 export function TopologyWorkspace({
   accessToken,
@@ -95,7 +98,13 @@ export function TopologyWorkspace({
     try { return readTopologyDisplayPrefs(userId).groupZoneOpacityPercent ?? 10; } catch { return 10; }
   });
   const [edgeLabelFontSize, setEdgeLabelFontSize] = useState<number>(() => {
-    try { return Number(localStorage.getItem(`netmap.edge-label-size.${userId}`)) || 13; } catch { return 13; }
+    try { return Number(localStorage.getItem(`netmap.edge-label-size.${userId}`)) || DEFAULT_EDGE_LABEL_FONT_SIZE; } catch { return DEFAULT_EDGE_LABEL_FONT_SIZE; }
+  });
+  const [nodeLabelFontSize, setNodeLabelFontSize] = useState<number>(() => {
+    try {
+      const prefs = readTopologyDisplayPrefs(userId);
+      return prefs.nodeLabelFontSize ?? (Number(localStorage.getItem(`netmap.node-label-size.${userId}`)) || DEFAULT_NODE_LABEL_FONT_SIZE);
+    } catch { return DEFAULT_NODE_LABEL_FONT_SIZE; }
   });
   const [showGroupZoneBorders, setShowGroupZoneBorders] = useState<boolean>(() => {
     try { return readTopologyDisplayPrefs(userId).showGroupZoneBorders ?? true; } catch { return true; }
@@ -112,7 +121,7 @@ export function TopologyWorkspace({
     Array<{ id: number; x: number; y: number; lines: string[]; color: string; icon: DeviceIcon; size: number }>
   >([]);
   const refreshOverlayNodesRef = useRef<() => void>(() => {});
-  const serverSaveLayoutRef = useRef<(positions: Record<string, { x: number; y: number }>) => void>(() => {});
+  const serverSaveLayoutRef = useRef<(positions: Record<string, { x: number; y: number }>, immediate?: boolean) => void>(() => {});
   const layoutSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layoutInitialLoadDoneRef = useRef(false);
   const setGroupForDisplayRef = useRef<(group: string) => void>(() => {});
@@ -135,6 +144,7 @@ export function TopologyWorkspace({
   const currentDisplayPrefsRef = useRef({
     groupDisplayPrefs,
     edgeLabelFontSize,
+    nodeLabelFontSize,
     groupZoneOpacityPercent,
     showGroupZoneBorders,
     hiddenGroupNames,
@@ -144,6 +154,7 @@ export function TopologyWorkspace({
   currentDisplayPrefsRef.current = {
     groupDisplayPrefs,
     edgeLabelFontSize,
+    nodeLabelFontSize,
     groupZoneOpacityPercent,
     showGroupZoneBorders,
     hiddenGroupNames,
@@ -151,19 +162,20 @@ export function TopologyWorkspace({
     showNodeLabels,
   };
 
-  serverSaveLayoutRef.current = (positions: Record<string, { x: number; y: number }>) => {
+  serverSaveLayoutRef.current = (positions: Record<string, { x: number; y: number }>, immediate = false) => {
     if (!accessToken || !layoutInitialLoadDoneRef.current) return;
     if (layoutSaveTimerRef.current) clearTimeout(layoutSaveTimerRef.current);
     const token = accessToken;
     const sanitizedPositions = sanitizeTopologyLayoutPositions(positions);
     const dp = currentDisplayPrefsRef.current;
-    layoutSaveTimerRef.current = setTimeout(() => {
+    const save = () => {
       void api.saveTopologyLayout(token, {
         name: "__autosave__",
         positions: sanitizedPositions,
         display_prefs: {
           groupDisplayPrefs: dp.groupDisplayPrefs,
           edgeLabelFontSize: dp.edgeLabelFontSize,
+          nodeLabelFontSize: dp.nodeLabelFontSize,
           groupZoneOpacityPercent: dp.groupZoneOpacityPercent,
           showGroupZoneBorders: dp.showGroupZoneBorders,
           hiddenGroupNames: [...dp.hiddenGroupNames],
@@ -171,7 +183,12 @@ export function TopologyWorkspace({
           showNodeLabels: dp.showNodeLabels,
         },
       });
-    }, 2000);
+    };
+    if (immediate) {
+      save();
+      return;
+    }
+    layoutSaveTimerRef.current = setTimeout(save, 2000);
   };
 
   useEffect(() => {
@@ -205,6 +222,8 @@ export function TopologyWorkspace({
     layoutPositionsRef.current = readSavedTopologyLayout(userId);
     const displayPrefs = readTopologyDisplayPrefs(userId);
     setGroupDisplayPrefs(displayPrefs.groups);
+    setNodeLabelFontSize(displayPrefs.nodeLabelFontSize ?? (Number(localStorage.getItem(`netmap.node-label-size.${userId}`)) || DEFAULT_NODE_LABEL_FONT_SIZE));
+    setEdgeLabelFontSize(Number(localStorage.getItem(`netmap.edge-label-size.${userId}`)) || DEFAULT_EDGE_LABEL_FONT_SIZE);
     fitOnNextRenderRef.current = true;
     setLayoutRevision((current) => current + 1);
   }, [userId]);
@@ -216,12 +235,13 @@ export function TopologyWorkspace({
       showGroupZoneBorders,
       showNodeIcons,
       showNodeLabels,
+      nodeLabelFontSize,
     });
-  }, [groupDisplayPrefs, groupZoneOpacityPercent, showGroupZoneBorders, showNodeIcons, showNodeLabels, userId]);
+  }, [groupDisplayPrefs, groupZoneOpacityPercent, nodeLabelFontSize, showGroupZoneBorders, showNodeIcons, showNodeLabels, userId]);
 
   useEffect(() => {
     serverSaveLayoutRef.current(layoutPositionsRef.current);
-  }, [groupDisplayPrefs, edgeLabelFontSize, groupZoneOpacityPercent, showGroupZoneBorders, hiddenGroupNames, showNodeIcons, showNodeLabels]);
+  }, [groupDisplayPrefs, edgeLabelFontSize, groupZoneOpacityPercent, hiddenGroupNames, nodeLabelFontSize, showGroupZoneBorders, showNodeIcons, showNodeLabels]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -243,10 +263,7 @@ export function TopologyWorkspace({
           if (autosave) {
             const autosavePositions = sanitizeTopologyLayoutPositions(autosave.positions);
             const autosaveTs = new Date(autosave.updated_at).getTime();
-            const localMeta = readSavedTopologyLayoutMeta(userId);
-            const localTs = localMeta?.savedAt ?? 0;
-            const noLocalPositions = Object.keys(layoutPositionsRef.current).length === 0;
-            if (noLocalPositions || autosaveTs > localTs) {
+            if (Object.keys(autosavePositions).length > 0) {
               layoutPositionsRef.current = autosavePositions;
               writeSavedTopologyLayoutMeta(userId, { savedAt: autosaveTs });
               window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(autosavePositions));
@@ -255,12 +272,14 @@ export function TopologyWorkspace({
                 const dp = autosave.display_prefs;
                 if (dp.groupDisplayPrefs !== undefined) setGroupDisplayPrefs(dp.groupDisplayPrefs);
                 if (dp.edgeLabelFontSize !== undefined) setEdgeLabelFontSize(dp.edgeLabelFontSize);
+                if (dp.nodeLabelFontSize !== undefined) setNodeLabelFontSize(dp.nodeLabelFontSize);
                 if (dp.groupZoneOpacityPercent !== undefined) setGroupZoneOpacityPercent(dp.groupZoneOpacityPercent);
                 if (dp.showGroupZoneBorders !== undefined) setShowGroupZoneBorders(dp.showGroupZoneBorders);
                 if (dp.hiddenGroupNames !== undefined) setHiddenGroupNames(new Set(dp.hiddenGroupNames));
                 if (dp.showNodeIcons !== undefined) setShowNodeIcons(dp.showNodeIcons);
                 if (dp.showNodeLabels !== undefined) setShowNodeLabels(dp.showNodeLabels);
-                try { localStorage.setItem(`netmap.edge-label-size.${userId}`, String(dp.edgeLabelFontSize ?? 13)); } catch {}
+                try { localStorage.setItem(`netmap.edge-label-size.${userId}`, String(dp.edgeLabelFontSize ?? DEFAULT_EDGE_LABEL_FONT_SIZE)); } catch {}
+                try { localStorage.setItem(`netmap.node-label-size.${userId}`, String(dp.nodeLabelFontSize ?? DEFAULT_NODE_LABEL_FONT_SIZE)); } catch {}
                 try { localStorage.setItem(`netmap.topology-hidden-groups.${userId}`, JSON.stringify(dp.hiddenGroupNames ?? [])); } catch {}
               }
               setLayoutRevision((c) => c + 1);
@@ -747,7 +766,7 @@ export function TopologyWorkspace({
       });
       cyRef.current.on("dragfree", "node.device", () => {
         persistCurrentTopologyLayout(cyRef.current, userIdRef.current, layoutPositionsRef);
-        serverSaveLayoutRef.current(layoutPositionsRef.current);
+        serverSaveLayoutRef.current(layoutPositionsRef.current, true);
         refreshOverlayNodesRef.current();
       });
       cyRef.current.on("zoom", () => {
@@ -1192,6 +1211,7 @@ export function TopologyWorkspace({
   function resetLayout() {
     clearSavedTopologyLayout(userId);
     layoutPositionsRef.current = {};
+    serverSaveLayoutRef.current({}, true);
     fitOnNextRenderRef.current = true;
     skipPersistOnNextRenderRef.current = true;
     setActiveSavedLayoutId(null);
@@ -1242,6 +1262,7 @@ export function TopologyWorkspace({
     const now = Date.now();
     window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(positions));
     writeSavedTopologyLayoutMeta(userId, { savedAt: now });
+    serverSaveLayoutRef.current(positions, true);
     fitOnNextRenderRef.current = true;
     setActiveSavedLayoutId(layout.id);
     setLayoutRevision((current) => current + 1);
@@ -1372,7 +1393,7 @@ export function TopologyWorkspace({
     const now = Date.now();
     window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(sanitizedPositions));
     writeSavedTopologyLayoutMeta(userId, { savedAt: now });
-    serverSaveLayoutRef.current(sanitizedPositions);
+    serverSaveLayoutRef.current(sanitizedPositions, true);
     refreshOverlayNodes();
   }
 
@@ -1414,7 +1435,7 @@ export function TopologyWorkspace({
     layoutPositionsRef.current = sanitizedPositions;
     window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(sanitizedPositions));
     writeSavedTopologyLayoutMeta(userId, { savedAt: Date.now() });
-    serverSaveLayoutRef.current(sanitizedPositions);
+    serverSaveLayoutRef.current(sanitizedPositions, true);
     skipPersistOnNextRenderRef.current = true;
     setLayoutRevision((c) => c + 1);
   }
@@ -1746,8 +1767,17 @@ export function TopologyWorkspace({
                       onChange={(e) => setGroupZoneOpacityPercent(Number(e.target.value))} />
                   </label>
                   <label>
+                    Device labels <span>{nodeLabelFontSize}px</span>
+                    <input type="range" min={11} max={24} step={1} value={nodeLabelFontSize}
+                      onChange={(e) => {
+                        const size = Number(e.target.value);
+                        setNodeLabelFontSize(size);
+                        try { localStorage.setItem(`netmap.node-label-size.${userId}`, String(size)); } catch {}
+                      }} />
+                  </label>
+                  <label>
                     Link labels <span>{edgeLabelFontSize}px</span>
-                    <input type="range" min={8} max={18} step={1} value={edgeLabelFontSize}
+                    <input type="range" min={10} max={24} step={1} value={edgeLabelFontSize}
                       onChange={(e) => {
                         const size = Number(e.target.value);
                         setEdgeLabelFontSize(size);
@@ -1791,7 +1821,7 @@ export function TopologyWorkspace({
                   </svg>
                 )}
                 {showNodeLabels && (
-                  <span className="topology-overlay-label">
+                  <span className="topology-overlay-label" style={{ fontSize: `${nodeLabelFontSize}px` }}>
                     {node.lines.map((line, index) => (
                       <span key={`${node.id}-line-${index}`}>{line}</span>
                     ))}
