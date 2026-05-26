@@ -495,16 +495,20 @@ def save_topology_layout(
         ),
     )
     created = layout is None
+    serialized_display_prefs = json.dumps(payload.display_prefs) if payload.display_prefs is not None else None
     if layout is None:
         layout = TopologyLayout(
             owner_user_id=current_user.id,
             name=payload.name,
             positions_json=json.dumps(serialize_layout_positions(payload.positions)),
+            display_prefs_json=serialized_display_prefs,
         )
         db.add(layout)
         db.flush()
     else:
         layout.positions_json = json.dumps(serialize_layout_positions(payload.positions))
+        if payload.display_prefs is not None:
+            layout.display_prefs_json = serialized_display_prefs
 
     write_audit(
         db,
@@ -951,9 +955,20 @@ def serialize_topology_layout(layout: TopologyLayout) -> TopologyLayoutRead:
         owner_user_id=layout.owner_user_id,
         name=layout.name,
         positions=deserialize_layout_positions(layout.positions_json),
+        display_prefs=deserialize_display_prefs(layout.display_prefs_json),
         created_at=layout.created_at,
         updated_at=layout.updated_at,
     )
+
+
+def deserialize_display_prefs(raw: str | None) -> dict | None:
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 def deserialize_layout_positions(raw_positions: str) -> dict:

@@ -118,6 +118,7 @@ def apply_sqlite_schema_updates() -> None:
         _run_migration(conn, inspector, "0026_backend_hot_path_indexes", _migrate_backend_hot_path_indexes)
         _run_migration(conn, inspector, "0027_user_device_favourites", _migrate_user_device_favourites)
         _run_migration(conn, inspector, "0028_topology_layouts", _migrate_topology_layouts)
+        _run_migration(conn, inspector, "0029_topology_layout_display_prefs", _migrate_topology_layout_display_prefs)
 
 
 def _run_migration(conn, inspector, name: str, fn) -> None:
@@ -631,6 +632,14 @@ def _migrate_user_device_favourites(conn, inspector) -> None:
             "CREATE INDEX IF NOT EXISTS ix_user_device_favourites_user_id "
             "ON user_device_favourites (user_id)"
         ))
+
+
+def _migrate_topology_layout_display_prefs(conn, inspector) -> None:
+    if "topology_layouts" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("topology_layouts")}
+    if "display_prefs_json" not in existing:
+        conn.execute(text("ALTER TABLE topology_layouts ADD COLUMN display_prefs_json TEXT"))
 
 
 def _migrate_topology_layouts(conn, inspector) -> None:

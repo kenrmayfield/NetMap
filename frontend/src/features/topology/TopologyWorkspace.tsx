@@ -13,6 +13,7 @@ import {
   groupId, buildDiagramLayout,
   savedTopologyLayoutKey, readTopologyDisplayPrefs, writeTopologyDisplayPrefs,
   readSavedTopologyLayout, clearSavedTopologyLayout,
+  readSavedTopologyLayoutMeta, writeSavedTopologyLayoutMeta,
   persistCurrentTopologyLayout, collectCurrentTopologyLayoutPositions, sanitizeTopologyLayoutPositions,
 } from "../../utils/topology";
 import { compareGroupLabels } from "../../utils/sort";
@@ -90,13 +91,21 @@ export function TopologyWorkspace({
       return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
     } catch { return new Set(); }
   });
-  const [groupZoneOpacityPercent, setGroupZoneOpacityPercent] = useState(10);
-  const [edgeLabelFontSize, setEdgeLabelFontSize] = useState<number>(() => {
-    try { return Number(localStorage.getItem(`netmap.edge-label-size.${userId}`)) || 11; } catch { return 11; }
+  const [groupZoneOpacityPercent, setGroupZoneOpacityPercent] = useState<number>(() => {
+    try { return readTopologyDisplayPrefs(userId).groupZoneOpacityPercent ?? 10; } catch { return 10; }
   });
-  const [showGroupZoneBorders, setShowGroupZoneBorders] = useState(true);
-  const [showNodeIcons, setShowNodeIcons] = useState(true);
-  const [showNodeLabels, setShowNodeLabels] = useState(true);
+  const [edgeLabelFontSize, setEdgeLabelFontSize] = useState<number>(() => {
+    try { return Number(localStorage.getItem(`netmap.edge-label-size.${userId}`)) || 13; } catch { return 13; }
+  });
+  const [showGroupZoneBorders, setShowGroupZoneBorders] = useState<boolean>(() => {
+    try { return readTopologyDisplayPrefs(userId).showGroupZoneBorders ?? true; } catch { return true; }
+  });
+  const [showNodeIcons, setShowNodeIcons] = useState<boolean>(() => {
+    try { return readTopologyDisplayPrefs(userId).showNodeIcons ?? true; } catch { return true; }
+  });
+  const [showNodeLabels, setShowNodeLabels] = useState<boolean>(() => {
+    try { return readTopologyDisplayPrefs(userId).showNodeLabels ?? true; } catch { return true; }
+  });
   const [selectedGroupForDisplay, setSelectedGroupForDisplay] = useState("Ungrouped");
   const [groupDisplayPrefs, setGroupDisplayPrefs] = useState<Record<string, { nodeScalePercent: number; spacingScalePercent: number; maxDevicesPerRow: number }>>({});
   const [overlayNodes, setOverlayNodes] = useState<
@@ -105,6 +114,7 @@ export function TopologyWorkspace({
   const refreshOverlayNodesRef = useRef<() => void>(() => {});
   const serverSaveLayoutRef = useRef<(positions: Record<string, { x: number; y: number }>) => void>(() => {});
   const layoutSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const layoutInitialLoadDoneRef = useRef(false);
   const setGroupForDisplayRef = useRef<(group: string) => void>(() => {});
   const userIdRef = useRef(userId);
   const previousShowDeviceFormRef = useRef(false);
@@ -122,14 +132,45 @@ export function TopologyWorkspace({
     setSelectedGroupForDisplay(group);
   };
 
+  const currentDisplayPrefsRef = useRef({
+    groupDisplayPrefs,
+    edgeLabelFontSize,
+    groupZoneOpacityPercent,
+    showGroupZoneBorders,
+    hiddenGroupNames,
+    showNodeIcons,
+    showNodeLabels,
+  });
+  currentDisplayPrefsRef.current = {
+    groupDisplayPrefs,
+    edgeLabelFontSize,
+    groupZoneOpacityPercent,
+    showGroupZoneBorders,
+    hiddenGroupNames,
+    showNodeIcons,
+    showNodeLabels,
+  };
+
   serverSaveLayoutRef.current = (positions: Record<string, { x: number; y: number }>) => {
-    if (!accessToken) return;
+    if (!accessToken || !layoutInitialLoadDoneRef.current) return;
     if (layoutSaveTimerRef.current) clearTimeout(layoutSaveTimerRef.current);
     const token = accessToken;
     const sanitizedPositions = sanitizeTopologyLayoutPositions(positions);
-    if (Object.keys(sanitizedPositions).length === 0) return;
+    const dp = currentDisplayPrefsRef.current;
     layoutSaveTimerRef.current = setTimeout(() => {
-      void api.saveTopologyLayout(token, { name: "__autosave__", positions: sanitizedPositions });
+      void api.saveTopologyLayout(token, {
+        name: "__autosave__",
+        positions: sanitizedPositions,
+        display_prefs: {
+          groupDisplayPrefs: dp.groupDisplayPrefs,
+          edgeLabelFontSize: dp.edgeLabelFontSize,
+          groupZoneOpacityPercent: dp.groupZoneOpacityPercent,
+          showGroupZoneBorders: dp.showGroupZoneBorders,
+          hiddenGroupNames: [...dp.hiddenGroupNames],
+          showNodeIcons: dp.showNodeIcons,
+          showNodeLabels: dp.showNodeLabels,
+        },
+      });
     }, 2000);
   };
 
@@ -169,16 +210,28 @@ export function TopologyWorkspace({
   }, [userId]);
 
   useEffect(() => {
-    writeTopologyDisplayPrefs(userId, { groups: groupDisplayPrefs });
-  }, [groupDisplayPrefs, userId]);
+    writeTopologyDisplayPrefs(userId, {
+      groups: groupDisplayPrefs,
+      groupZoneOpacityPercent,
+      showGroupZoneBorders,
+      showNodeIcons,
+      showNodeLabels,
+    });
+  }, [groupDisplayPrefs, groupZoneOpacityPercent, showGroupZoneBorders, showNodeIcons, showNodeLabels, userId]);
+
+  useEffect(() => {
+    serverSaveLayoutRef.current(layoutPositionsRef.current);
+  }, [groupDisplayPrefs, edgeLabelFontSize, groupZoneOpacityPercent, showGroupZoneBorders, hiddenGroupNames, showNodeIcons, showNodeLabels]);
 
   useEffect(() => {
     if (!accessToken) {
       setSavedLayouts([]);
       setGroups([]);
       setSites([]);
+      layoutInitialLoadDoneRef.current = false;
       return;
     }
+    layoutInitialLoadDoneRef.current = false;
     const token = accessToken;
     let cancelled = false;
     async function loadSavedLayouts() {
@@ -186,20 +239,38 @@ export function TopologyWorkspace({
         const layouts = await api.topologyLayouts(token);
         if (!cancelled) {
           setSavedLayouts(layouts.filter((l) => l.name !== "__autosave__"));
-          // Apply server autosave when no local layout exists (new browser / cleared storage)
-          if (Object.keys(layoutPositionsRef.current).length === 0) {
-            const autosave = layouts.find((l) => l.name === "__autosave__");
-            if (autosave) {
-              const autosavePositions = sanitizeTopologyLayoutPositions(autosave.positions);
+          const autosave = layouts.find((l) => l.name === "__autosave__");
+          if (autosave) {
+            const autosavePositions = sanitizeTopologyLayoutPositions(autosave.positions);
+            const autosaveTs = new Date(autosave.updated_at).getTime();
+            const localMeta = readSavedTopologyLayoutMeta(userId);
+            const localTs = localMeta?.savedAt ?? 0;
+            const noLocalPositions = Object.keys(layoutPositionsRef.current).length === 0;
+            if (noLocalPositions || autosaveTs > localTs) {
               layoutPositionsRef.current = autosavePositions;
+              writeSavedTopologyLayoutMeta(userId, { savedAt: autosaveTs });
               window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(autosavePositions));
               fitOnNextRenderRef.current = true;
+              if (autosave.display_prefs) {
+                const dp = autosave.display_prefs;
+                if (dp.groupDisplayPrefs !== undefined) setGroupDisplayPrefs(dp.groupDisplayPrefs);
+                if (dp.edgeLabelFontSize !== undefined) setEdgeLabelFontSize(dp.edgeLabelFontSize);
+                if (dp.groupZoneOpacityPercent !== undefined) setGroupZoneOpacityPercent(dp.groupZoneOpacityPercent);
+                if (dp.showGroupZoneBorders !== undefined) setShowGroupZoneBorders(dp.showGroupZoneBorders);
+                if (dp.hiddenGroupNames !== undefined) setHiddenGroupNames(new Set(dp.hiddenGroupNames));
+                if (dp.showNodeIcons !== undefined) setShowNodeIcons(dp.showNodeIcons);
+                if (dp.showNodeLabels !== undefined) setShowNodeLabels(dp.showNodeLabels);
+                try { localStorage.setItem(`netmap.edge-label-size.${userId}`, String(dp.edgeLabelFontSize ?? 13)); } catch {}
+                try { localStorage.setItem(`netmap.topology-hidden-groups.${userId}`, JSON.stringify(dp.hiddenGroupNames ?? [])); } catch {}
+              }
               setLayoutRevision((c) => c + 1);
             }
           }
+          layoutInitialLoadDoneRef.current = true;
         }
       } catch (err) {
         if (!cancelled) {
+          layoutInitialLoadDoneRef.current = true;
           setTopologyError(err instanceof Error ? err.message : "Unable to load saved layouts");
         }
       }
@@ -1168,7 +1239,9 @@ export function TopologyWorkspace({
   function loadSavedLayout(layout: TopologyLayout) {
     const positions = sanitizeTopologyLayoutPositions(layout.positions);
     layoutPositionsRef.current = positions;
+    const now = Date.now();
     window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(positions));
+    writeSavedTopologyLayoutMeta(userId, { savedAt: now });
     fitOnNextRenderRef.current = true;
     setActiveSavedLayoutId(layout.id);
     setLayoutRevision((current) => current + 1);
@@ -1296,7 +1369,9 @@ export function TopologyWorkspace({
     }
     const sanitizedPositions = sanitizeTopologyLayoutPositions(nextPositions);
     layoutPositionsRef.current = sanitizedPositions;
+    const now = Date.now();
     window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(sanitizedPositions));
+    writeSavedTopologyLayoutMeta(userId, { savedAt: now });
     serverSaveLayoutRef.current(sanitizedPositions);
     refreshOverlayNodes();
   }
@@ -1338,6 +1413,7 @@ export function TopologyWorkspace({
     const sanitizedPositions = sanitizeTopologyLayoutPositions(nextPositions);
     layoutPositionsRef.current = sanitizedPositions;
     window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(sanitizedPositions));
+    writeSavedTopologyLayoutMeta(userId, { savedAt: Date.now() });
     serverSaveLayoutRef.current(sanitizedPositions);
     skipPersistOnNextRenderRef.current = true;
     setLayoutRevision((c) => c + 1);

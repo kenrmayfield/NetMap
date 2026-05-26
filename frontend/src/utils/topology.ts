@@ -158,31 +158,52 @@ export function savedTopologyLayoutKey(userId: number) {
   return `${topologyLayoutStoragePrefix}.v${topologyLayoutVersion}.${userId}`;
 }
 
+export function savedTopologyLayoutMetaKey(userId: number) {
+  return `${topologyLayoutStoragePrefix}.meta.${userId}`;
+}
+
 export function topologyDisplayPrefsKey(userId: number) {
   return `${topologyDisplayPrefsStoragePrefix}.${userId}`;
 }
 
-export function readTopologyDisplayPrefs(userId: number): {
+export type TopologyDisplayPrefsLocal = {
   groups: Record<string, { nodeScalePercent: number; spacingScalePercent: number; maxDevicesPerRow: number }>;
-} {
+  groupZoneOpacityPercent?: number;
+  showGroupZoneBorders?: boolean;
+  showNodeIcons?: boolean;
+  showNodeLabels?: boolean;
+};
+
+export function readTopologyDisplayPrefs(userId: number): TopologyDisplayPrefsLocal {
   const raw = window.localStorage.getItem(topologyDisplayPrefsKey(userId));
   if (!raw) return { groups: {} };
   try {
-    const parsed = JSON.parse(raw) as {
-      groups?: Record<string, { nodeScalePercent: number; spacingScalePercent: number; maxDevicesPerRow: number }>;
+    const parsed = JSON.parse(raw) as TopologyDisplayPrefsLocal;
+    return {
+      groups: parsed.groups ?? {},
+      groupZoneOpacityPercent: parsed.groupZoneOpacityPercent,
+      showGroupZoneBorders: parsed.showGroupZoneBorders,
+      showNodeIcons: parsed.showNodeIcons,
+      showNodeLabels: parsed.showNodeLabels,
     };
-    return { groups: parsed.groups ?? {} };
   } catch {
     window.localStorage.removeItem(topologyDisplayPrefsKey(userId));
     return { groups: {} };
   }
 }
 
-export function writeTopologyDisplayPrefs(
-  userId: number,
-  prefs: { groups: Record<string, { nodeScalePercent: number; spacingScalePercent: number; maxDevicesPerRow: number }> },
-) {
+export function writeTopologyDisplayPrefs(userId: number, prefs: TopologyDisplayPrefsLocal) {
   window.localStorage.setItem(topologyDisplayPrefsKey(userId), JSON.stringify(prefs));
+}
+
+export function readSavedTopologyLayoutMeta(userId: number): { savedAt: number } | null {
+  const raw = window.localStorage.getItem(savedTopologyLayoutMetaKey(userId));
+  if (!raw) return null;
+  try { return JSON.parse(raw) as { savedAt: number }; } catch { return null; }
+}
+
+export function writeSavedTopologyLayoutMeta(userId: number, meta: { savedAt: number }) {
+  window.localStorage.setItem(savedTopologyLayoutMetaKey(userId), JSON.stringify(meta));
 }
 
 export function readSavedTopologyLayout(userId: number) {
@@ -199,6 +220,7 @@ export function readSavedTopologyLayout(userId: number) {
 
 export function clearSavedTopologyLayout(userId: number) {
   window.localStorage.removeItem(savedTopologyLayoutKey(userId));
+  window.localStorage.removeItem(savedTopologyLayoutMetaKey(userId));
 }
 
 export function collectCurrentTopologyLayoutPositions(cy: Core | null) {
@@ -238,5 +260,7 @@ export function persistCurrentTopologyLayout(
   const visiblePositions = collectCurrentTopologyLayoutPositions(cy);
   if (Object.keys(visiblePositions).length === 0) return;
   layoutPositionsRef.current = sanitizeTopologyLayoutPositions({ ...layoutPositionsRef.current, ...visiblePositions });
+  const now = Date.now();
   window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(layoutPositionsRef.current));
+  window.localStorage.setItem(savedTopologyLayoutMetaKey(userId), JSON.stringify({ savedAt: now }));
 }

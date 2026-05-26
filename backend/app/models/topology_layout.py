@@ -16,6 +16,7 @@ class TopologyLayout(Base):
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     positions_json: Mapped[str] = mapped_column(Text, nullable=False)
+    display_prefs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

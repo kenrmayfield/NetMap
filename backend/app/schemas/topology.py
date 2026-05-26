@@ -262,17 +262,28 @@ class TopologyLayoutBase(BaseModel):
 
 class TopologyLayoutCreate(TopologyLayoutBase):
     positions: dict[str, LayoutPosition] = Field(default_factory=dict)
+    display_prefs: dict | None = None
 
     @field_validator("positions")
     @classmethod
     def validate_positions(cls, positions: dict[str, LayoutPosition]) -> dict[str, LayoutPosition]:
         return normalize_layout_positions(positions)
 
+    @field_validator("display_prefs")
+    @classmethod
+    def validate_display_prefs(cls, value: dict | None) -> dict | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("display_prefs must be an object")
+        return value
+
 
 class TopologyLayoutRead(TopologyLayoutBase):
     id: int
     owner_user_id: int
     positions: dict[str, LayoutPosition] = Field(default_factory=dict)
+    display_prefs: dict | None = None
     created_at: datetime
     updated_at: datetime
 

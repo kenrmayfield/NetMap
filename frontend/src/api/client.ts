@@ -123,11 +123,22 @@ export type LayoutPosition = {
   y: number;
 };
 
+export type TopologyDisplayPrefs = {
+  groupDisplayPrefs?: Record<string, { nodeScalePercent: number; spacingScalePercent: number; maxDevicesPerRow: number }>;
+  edgeLabelFontSize?: number;
+  groupZoneOpacityPercent?: number;
+  showGroupZoneBorders?: boolean;
+  hiddenGroupNames?: string[];
+  showNodeIcons?: boolean;
+  showNodeLabels?: boolean;
+};
+
 export type TopologyLayout = {
   id: number;
   owner_user_id: number;
   name: string;
   positions: Record<string, LayoutPosition>;
+  display_prefs: TopologyDisplayPrefs | null;
   created_at: string;
   updated_at: string;
 };
@@ -902,7 +913,7 @@ export const api = {
     }),
   saveTopologyLayout: (
     token: string,
-    payload: { name: string; positions: Record<string, LayoutPosition> },
+    payload: { name: string; positions: Record<string, LayoutPosition>; display_prefs?: TopologyDisplayPrefs | null },
   ) =>
     request<TopologyLayout>("/api/v1/topology/layouts", {
       method: "POST",
