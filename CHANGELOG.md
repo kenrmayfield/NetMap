@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Topology
+- Topology layout and all display preferences (node size, spacing, per-row, zone opacity/borders, hidden groups, device/link label sizes, icon and text visibility) are now saved server-side per user. Opening the map on any device restores the exact state from the last session.
+- Layout saving is fully automatic — positions save immediately on every drag and display preferences save within two seconds of any change. The manual Save and Load buttons have been removed.
+- Fixed: saved node positions were being silently overwritten by stale canvas state every time the layout loaded, causing the map to revert to its previous arrangement on every page open.
+- Link creation form now uses a searchable picker instead of a plain scroll-list — filter devices by IP address, hostname, or display name.
+- Node label default size increased from 9 px to 11 px; link label default size increased from 11 px to 13 px.
+
+### Docker / Runtime
+- Application now recovers automatically from a corrupt `firewall.db` on startup: if the SQLite schema table is malformed (e.g. after an unclean shutdown), the database file and its WAL/SHM sidecars are deleted and recreated. Only syslog/firewall event history is lost; all device, user, and configuration data is unaffected.
+
 ---
 
 ## [1.2.3] - 2026-05-25

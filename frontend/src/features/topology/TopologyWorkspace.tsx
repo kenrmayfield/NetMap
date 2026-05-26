@@ -27,8 +27,8 @@ import { RelationshipDetails } from "./RelationshipDetails";
 import { RelationshipEditForm, RelationshipForm } from "./RelationshipForm";
 import { DiscoveryModal } from "./DiscoveryModal";
 
-const DEFAULT_NODE_LABEL_FONT_SIZE = 15;
 const DEFAULT_EDGE_LABEL_FONT_SIZE = 15;
+const DEFAULT_NODE_LABEL_FONT_SIZE = 11;
 
 export function TopologyWorkspace({
   accessToken,
@@ -218,6 +218,31 @@ export function TopologyWorkspace({
     onSelectedDeviceChange(selectedDevice);
   }, [onSelectedDeviceChange, selectedDevice]);
 
+  function applyAutosaveLayout(layout: TopologyLayout) {
+    const autosavePositions = sanitizeTopologyLayoutPositions(layout.positions);
+    const autosaveTs = new Date(layout.updated_at).getTime();
+    layoutPositionsRef.current = autosavePositions;
+    writeSavedTopologyLayoutMeta(userId, { savedAt: autosaveTs });
+    window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(autosavePositions));
+    fitOnNextRenderRef.current = true;
+    skipPersistOnNextRenderRef.current = true;
+    if (layout.display_prefs) {
+      const dp = layout.display_prefs;
+      if (dp.groupDisplayPrefs !== undefined) setGroupDisplayPrefs(dp.groupDisplayPrefs);
+      if (dp.edgeLabelFontSize !== undefined) setEdgeLabelFontSize(dp.edgeLabelFontSize);
+      if (dp.nodeLabelFontSize !== undefined) setNodeLabelFontSize(dp.nodeLabelFontSize);
+      if (dp.groupZoneOpacityPercent !== undefined) setGroupZoneOpacityPercent(dp.groupZoneOpacityPercent);
+      if (dp.showGroupZoneBorders !== undefined) setShowGroupZoneBorders(dp.showGroupZoneBorders);
+      if (dp.hiddenGroupNames !== undefined) setHiddenGroupNames(new Set(dp.hiddenGroupNames));
+      if (dp.showNodeIcons !== undefined) setShowNodeIcons(dp.showNodeIcons);
+      if (dp.showNodeLabels !== undefined) setShowNodeLabels(dp.showNodeLabels);
+      try { localStorage.setItem(`netmap.edge-label-size.${userId}`, String(dp.edgeLabelFontSize ?? DEFAULT_EDGE_LABEL_FONT_SIZE)); } catch {}
+      try { localStorage.setItem(`netmap.node-label-size.${userId}`, String(dp.nodeLabelFontSize ?? DEFAULT_NODE_LABEL_FONT_SIZE)); } catch {}
+      try { localStorage.setItem(`netmap.topology-hidden-groups.${userId}`, JSON.stringify(dp.hiddenGroupNames ?? [])); } catch {}
+    }
+    setLayoutRevision((c) => c + 1);
+  }
+
   useEffect(() => {
     layoutPositionsRef.current = readSavedTopologyLayout(userId);
     const displayPrefs = readTopologyDisplayPrefs(userId);
@@ -261,29 +286,7 @@ export function TopologyWorkspace({
           setSavedLayouts(layouts.filter((l) => l.name !== "__autosave__"));
           const autosave = layouts.find((l) => l.name === "__autosave__");
           if (autosave) {
-            const autosavePositions = sanitizeTopologyLayoutPositions(autosave.positions);
-            const autosaveTs = new Date(autosave.updated_at).getTime();
-            if (Object.keys(autosavePositions).length > 0) {
-              layoutPositionsRef.current = autosavePositions;
-              writeSavedTopologyLayoutMeta(userId, { savedAt: autosaveTs });
-              window.localStorage.setItem(savedTopologyLayoutKey(userId), JSON.stringify(autosavePositions));
-              fitOnNextRenderRef.current = true;
-              if (autosave.display_prefs) {
-                const dp = autosave.display_prefs;
-                if (dp.groupDisplayPrefs !== undefined) setGroupDisplayPrefs(dp.groupDisplayPrefs);
-                if (dp.edgeLabelFontSize !== undefined) setEdgeLabelFontSize(dp.edgeLabelFontSize);
-                if (dp.nodeLabelFontSize !== undefined) setNodeLabelFontSize(dp.nodeLabelFontSize);
-                if (dp.groupZoneOpacityPercent !== undefined) setGroupZoneOpacityPercent(dp.groupZoneOpacityPercent);
-                if (dp.showGroupZoneBorders !== undefined) setShowGroupZoneBorders(dp.showGroupZoneBorders);
-                if (dp.hiddenGroupNames !== undefined) setHiddenGroupNames(new Set(dp.hiddenGroupNames));
-                if (dp.showNodeIcons !== undefined) setShowNodeIcons(dp.showNodeIcons);
-                if (dp.showNodeLabels !== undefined) setShowNodeLabels(dp.showNodeLabels);
-                try { localStorage.setItem(`netmap.edge-label-size.${userId}`, String(dp.edgeLabelFontSize ?? DEFAULT_EDGE_LABEL_FONT_SIZE)); } catch {}
-                try { localStorage.setItem(`netmap.node-label-size.${userId}`, String(dp.nodeLabelFontSize ?? DEFAULT_NODE_LABEL_FONT_SIZE)); } catch {}
-                try { localStorage.setItem(`netmap.topology-hidden-groups.${userId}`, JSON.stringify(dp.hiddenGroupNames ?? [])); } catch {}
-              }
-              setLayoutRevision((c) => c + 1);
-            }
+            applyAutosaveLayout(autosave);
           }
           layoutInitialLoadDoneRef.current = true;
         }
@@ -769,6 +772,11 @@ export function TopologyWorkspace({
         serverSaveLayoutRef.current(layoutPositionsRef.current, true);
         refreshOverlayNodesRef.current();
       });
+      cyRef.current.on("dragfree", "node.zone", () => {
+        persistCurrentTopologyLayout(cyRef.current, userIdRef.current, layoutPositionsRef);
+        serverSaveLayoutRef.current(layoutPositionsRef.current, true);
+        refreshOverlayNodesRef.current();
+      });
       cyRef.current.on("zoom", () => {
         refreshOverlayNodesRef.current();
       });
@@ -1217,6 +1225,7 @@ export function TopologyWorkspace({
     setActiveSavedLayoutId(null);
     setLayoutRevision((current) => current + 1);
   }
+
 
   async function refreshSavedLayouts() {
     if (!accessToken) {
@@ -1768,7 +1777,7 @@ export function TopologyWorkspace({
                   </label>
                   <label>
                     Device labels <span>{nodeLabelFontSize}px</span>
-                    <input type="range" min={11} max={24} step={1} value={nodeLabelFontSize}
+                    <input type="range" min={9} max={20} step={1} value={nodeLabelFontSize}
                       onChange={(e) => {
                         const size = Number(e.target.value);
                         setNodeLabelFontSize(size);

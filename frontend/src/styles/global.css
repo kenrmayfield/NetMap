@@ -2657,13 +2657,13 @@ body.route-topology .topology-content {
 }
 
 .topo-entity-panel {
-  position: absolute;
-  top: 8px;
-  right: 0;
+  position: fixed;
+  top: 38px;
+  right: 22px;
   z-index: 45;
   display: flex;
   gap: 6px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .topo-stat-btn {
@@ -3166,24 +3166,14 @@ body.route-locations .dash-layout {
   flex-direction: column;
   align-items: center;
   line-height: 1.2;
-  font-size: 15px;
+  font-size: 11px;
   font-weight: 700;
   color: #111111;
-  text-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.92),
-    0 -1px 0 rgba(255, 255, 255, 0.92),
-    1px 0 0 rgba(255, 255, 255, 0.92),
-    -1px 0 0 rgba(255, 255, 255, 0.92);
   white-space: nowrap;
 }
 
 body.theme-dark .topology-overlay-label {
   color: #ffffff;
-  text-shadow:
-    0 1px 0 rgba(15, 25, 35, 0.95),
-    0 -1px 0 rgba(15, 25, 35, 0.95),
-    1px 0 0 rgba(15, 25, 35, 0.95),
-    -1px 0 0 rgba(15, 25, 35, 0.95);
 }
 
 .graph-surface:active {
@@ -7141,6 +7131,9 @@ body.theme-dark .toolbar-btn:hover:not(:disabled) {
   border-color: #41586d;
   color: #e3eef6;
 }
+body.theme-dark .toolbar-save-status {
+  color: #75d4e4;
+}
 body.theme-dark .toolbar-select {
   background: #1b2731;
   border-color: #324454;
@@ -8604,6 +8597,13 @@ body.theme-dark .admin-action-btn--danger:hover { background: rgba(180,60,60,0.1
 .toolbar-btn--primary:hover {
   opacity: 0.88;
   border-color: rgba(29, 154, 176, 0.6);
+}
+
+.toolbar-save-status {
+  color: #1d6472;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .toolbar-toggle {
