@@ -228,7 +228,7 @@ export function clearSavedTopologyLayout(userId: number) {
 export function collectCurrentTopologyLayoutPositions(cy: Core | null) {
   const visiblePositions: Record<string, { x: number; y: number }> = {};
   if (!cy) return visiblePositions;
-  cy.$("node.device").forEach((node) => {
+  cy.$("node.device, node.zone").forEach((node) => {
     const position = node.position();
     if (isFiniteLayoutPosition(position)) {
       visiblePositions[node.id()] = { x: position.x, y: position.y };

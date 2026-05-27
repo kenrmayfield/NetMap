@@ -8,6 +8,12 @@
 - Fixed: saved node positions were being silently overwritten by stale canvas state every time the layout loaded, causing the map to revert to its previous arrangement on every page open.
 - Link creation form now uses a searchable picker instead of a plain scroll-list — filter devices by IP address, hostname, or display name.
 - Node label default size increased from 9 px to 11 px; link label default size increased from 11 px to 13 px.
+- Device node labels now scale with zoom: hidden below 35% zoom, single-line truncated between 35–60%, full labels above 60%. Prevents label overlap on dense graphs at low zoom.
+- Link click targets widened: edges now have an invisible 12 px padding zone around them, making narrow links easier to select in dense areas.
+- Hovered device nodes now render above selected links in Cytoscape hit-testing, so an icon is always clickable even when a selected link passes through it.
+
+### Performance
+- All workspaces (Inventory, Topology, IPAM, Monitoring, Security, Admin, and others) are now loaded on demand rather than bundled into the initial page load. Cytoscape (the topology map library) is only downloaded when the Topology page is opened.
 
 ### Docker / Runtime
 - Application now recovers automatically from a corrupt `firewall.db` on startup: if the SQLite schema table is malformed (e.g. after an unclean shutdown), the database file and its WAL/SHM sidecars are deleted and recreated. Only syslog/firewall event history is lost; all device, user, and configuration data is unaffected.

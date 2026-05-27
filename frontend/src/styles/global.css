@@ -3180,6 +3180,11 @@ body.theme-dark .topology-overlay-label {
   cursor: grabbing;
 }
 
+.workspace-loading {
+  flex: 1 1 auto;
+  display: block;
+}
+
 .empty-graph {
   position: absolute;
   inset: 0;

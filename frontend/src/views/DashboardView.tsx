@@ -1,21 +1,46 @@
-import { useState, useEffect, useCallback } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 import {
   api, type User, type TopologyGraph, type DashboardSummary, type Device, type VersionInfo,
 } from "../api/client";
 import { type AppRoute } from "../routes";
 import { type IconPack } from "../icons";
-import { OverviewWorkspace } from "../features/overview/OverviewWorkspace";
-import { SecurityWorkspace } from "../features/security/SecurityWorkspace";
-import { ToolsWorkspace } from "../features/tools/ToolsWorkspace";
-import { ExportsWorkspace } from "../features/exports/ExportsWorkspace";
-import { AdminWorkspace } from "../features/admin/AdminWorkspace";
-import { TopologyWorkspace } from "../features/topology/TopologyWorkspace";
-import { InventoryWorkspace } from "../features/inventory/InventoryWorkspace";
-import { VlanWorkspace } from "../features/vlans/VlanWorkspace";
-import { LocationsWorkspace } from "../features/locations/LocationsWorkspace";
-import { ProfileWorkspace } from "../features/profile/ProfileWorkspace";
-import { IpamWorkspace } from "../features/ipam/IpamWorkspace";
-import { MonitoringWorkspace } from "../features/monitoring/MonitoringWorkspace";
+
+const OverviewWorkspace = lazy(() =>
+  import("../features/overview/OverviewWorkspace").then((m) => ({ default: m.OverviewWorkspace }))
+);
+const SecurityWorkspace = lazy(() =>
+  import("../features/security/SecurityWorkspace").then((m) => ({ default: m.SecurityWorkspace }))
+);
+const ToolsWorkspace = lazy(() =>
+  import("../features/tools/ToolsWorkspace").then((m) => ({ default: m.ToolsWorkspace }))
+);
+const ExportsWorkspace = lazy(() =>
+  import("../features/exports/ExportsWorkspace").then((m) => ({ default: m.ExportsWorkspace }))
+);
+const AdminWorkspace = lazy(() =>
+  import("../features/admin/AdminWorkspace").then((m) => ({ default: m.AdminWorkspace }))
+);
+const TopologyWorkspace = lazy(() =>
+  import("../features/topology/TopologyWorkspace").then((m) => ({ default: m.TopologyWorkspace }))
+);
+const InventoryWorkspace = lazy(() =>
+  import("../features/inventory/InventoryWorkspace").then((m) => ({ default: m.InventoryWorkspace }))
+);
+const VlanWorkspace = lazy(() =>
+  import("../features/vlans/VlanWorkspace").then((m) => ({ default: m.VlanWorkspace }))
+);
+const LocationsWorkspace = lazy(() =>
+  import("../features/locations/LocationsWorkspace").then((m) => ({ default: m.LocationsWorkspace }))
+);
+const ProfileWorkspace = lazy(() =>
+  import("../features/profile/ProfileWorkspace").then((m) => ({ default: m.ProfileWorkspace }))
+);
+const IpamWorkspace = lazy(() =>
+  import("../features/ipam/IpamWorkspace").then((m) => ({ default: m.IpamWorkspace }))
+);
+const MonitoringWorkspace = lazy(() =>
+  import("../features/monitoring/MonitoringWorkspace").then((m) => ({ default: m.MonitoringWorkspace }))
+);
 
 export function DashboardView({
   accessToken,
@@ -97,7 +122,7 @@ export function DashboardView({
   }
 
   return (
-    <>
+    <Suspense fallback={<div className="workspace-loading" />}>
       {currentRoute === "/overview" && (
         <OverviewWorkspace
           accessToken={accessToken}
@@ -187,6 +212,6 @@ export function DashboardView({
       {currentRoute === "/profile" && accessToken && (
         <ProfileWorkspace accessToken={accessToken} user={user} onUserUpdate={onUserUpdate} />
       )}
-    </>
+    </Suspense>
   );
 }

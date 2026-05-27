@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "analyze": "vite build && xdg-open dist/stats.html 2>/dev/null || open dist/stats.html 2>/dev/null || true",
     "preview": "vite preview --host 0.0.0.0",
-    "import-icon-pack": "node ./scripts/import-icon-pack.mjs"
+    "import-icon-pack": "node ./scripts/import-icon-pack.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@tabler/icons-react": "^3.43.0",
@@ -18,10 +21,12 @@
     "react-dom": "^18.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/dompurify": "^3.0.5",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "latest",
+    "rollup-plugin-visualizer": "^6.0.11",
     "typescript": "^6.0.3",
     "vite": "^7.0.0"
   }

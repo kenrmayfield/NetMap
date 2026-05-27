@@ -1,13 +1,17 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import json
+import logging
 from math import isfinite
 import socket
 import time
 from typing import Annotated
 
+logger = logging.getLogger(__name__)
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
+from sqlalchemy.exc import DatabaseError as SQLAlchemyDatabaseError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_security_view, require_topology_write
@@ -564,13 +568,25 @@ def list_device_security_events(
     if device is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
 
-    events = list_recent_device_events(
-        firewall_db,
-        device=device,
-        window_start=window_start,
-        limit=bounded_limit,
-    )
-    event_counts = build_device_event_counts(firewall_db, [device], window_start=window_start)[device.id]
+    try:
+        events = list_recent_device_events(
+            firewall_db,
+            device=device,
+            window_start=window_start,
+            limit=bounded_limit,
+        )
+        event_counts = build_device_event_counts(firewall_db, [device], window_start=window_start)[device.id]
+    except SQLAlchemyDatabaseError as exc:
+        logger.error("firewall_db read error for device %d security events: %s", device_id, exc)
+        return DeviceSecurityEventSummary(
+            device_id=device.id,
+            window_hours=bounded_window,
+            blocked_count=0,
+            passed_count=0,
+            total_count=0,
+            last_seen_event_time=None,
+            events=[],
+        )
     return DeviceSecurityEventSummary(
         device_id=device.id,
         window_hours=bounded_window,

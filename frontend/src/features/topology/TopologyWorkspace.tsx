@@ -6,7 +6,7 @@ import {
   api,
   type Device, type Relationship, type RelationshipPayload, type DevicePayload,
   type DeviceLiveStatus, type TopologyGraph, type TopologyGroup, type Site,
-  type DeviceEventCount, type DeviceSecurityEventSummary, type TopologyLayout, type DeviceIcon,
+  type DeviceSecurityEventSummary, type TopologyLayout, type DeviceIcon,
 } from "../../api/client";
 import { type DiagramLayout, type DiagramLayoutOptions } from "../../types";
 import {
@@ -71,11 +71,6 @@ export function TopologyWorkspace({
   const [showScanModal, setShowScanModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [topologyError, setTopologyError] = useState<string | null>(null);
-  const [securityOverlayEnabled, setSecurityOverlayEnabled] = useState(true);
-  const [showOnlyDevicesWithEvents, setShowOnlyDevicesWithEvents] = useState(false);
-  const [eventCounts, setEventCounts] = useState<DeviceEventCount[]>([]);
-  const [topAffected, setTopAffected] = useState<DeviceEventCount[]>([]);
-  const [securityLoading, setSecurityLoading] = useState(false);
   const [deviceSecuritySummary, setDeviceSecuritySummary] = useState<DeviceSecurityEventSummary | null>(null);
   const [deviceSecurityLoading, setDeviceSecurityLoading] = useState(false);
   const [layoutRevision, setLayoutRevision] = useState(0);
@@ -131,6 +126,7 @@ export function TopologyWorkspace({
   const pendingRelationshipPatchesRef = useRef<Record<number, Partial<Relationship>>>({});
   const correlationWindowHours = 24;
   const [liveGraph, setLiveGraph] = useState<TopologyGraph>(graph);
+  const [cyZoom, setCyZoom] = useState(1);
 
   useEffect(() => {
     userIdRef.current = userId;
@@ -325,10 +321,6 @@ export function TopologyWorkspace({
     };
   }, [accessToken, userId]);
 
-  const eventCountByDeviceId = useMemo(
-    () => new Map(eventCounts.map((row) => [row.device_id, row])),
-    [eventCounts],
-  );
   const liveStatusByDeviceId = useMemo(
     () => new Map(liveStatuses.map((row) => [row.device_id, row])),
     [liveStatuses],
@@ -343,18 +335,6 @@ export function TopologyWorkspace({
         (r) => !disabledIds.has(r.source_device_id) && !disabledIds.has(r.target_device_id),
       ),
     } : liveGraph;
-
-    if (canViewSecurity && showOnlyDevicesWithEvents) {
-      const allowed = new Set(
-        eventCounts.filter((count) => count.event_count > 0).map((count) => count.device_id),
-      );
-      base = {
-        devices: base.devices.filter((device) => allowed.has(device.id)),
-        relationships: base.relationships.filter(
-          (r) => allowed.has(r.source_device_id) && allowed.has(r.target_device_id),
-        ),
-      };
-    }
 
     if (selectedSiteId !== null) {
       const siteDeviceIds = new Set(
@@ -383,7 +363,7 @@ export function TopologyWorkspace({
     }
 
     return base;
-  }, [canViewSecurity, eventCounts, hiddenGroupNames, liveGraph, showOnlyDevicesWithEvents, selectedSiteId]);
+  }, [hiddenGroupNames, liveGraph, selectedSiteId]);
   const visibleGroupNames = useMemo(
     () => [...new Set(filteredGraph.devices.map((device) => device.topology_group))].sort(compareGroupLabels),
     [filteredGraph.devices],
@@ -425,11 +405,7 @@ export function TopologyWorkspace({
           return null;
         }
         const position = node.renderedPosition();
-        const count = eventCountByDeviceId.get(device.id)?.event_count ?? 0;
-        const hasEvents = securityOverlayEnabled && count > 0;
-        const label = hasEvents
-          ? `${deviceLabel(device)}\n${count} ${count === 1 ? "event" : "events"}`
-          : deviceLabel(device);
+        const label = deviceLabel(device);
         const nodeScale = Math.max(0.7, Math.min(2.2, Number(node.data("nodeScale") ?? 1)));
         return {
           id: device.id,
@@ -443,7 +419,7 @@ export function TopologyWorkspace({
       })
       .filter((row): row is { id: number; x: number; y: number; lines: string[]; color: string; icon: DeviceIcon; size: number } => row !== null);
     setOverlayNodes(nextNodes);
-  }, [activeIconPackId, eventCountByDeviceId, filteredGraph.devices, securityOverlayEnabled]);
+  }, [activeIconPackId, filteredGraph.devices]);
 
   useEffect(() => {
     refreshOverlayNodesRef.current = refreshOverlayNodes;
@@ -492,41 +468,6 @@ export function TopologyWorkspace({
       }
     }
   }
-
-  useEffect(() => {
-    if (!canViewSecurity || !accessToken) {
-      setEventCounts([]);
-      setTopAffected([]);
-      return;
-    }
-    const token = accessToken;
-    let cancelled = false;
-    async function loadCorrelationData() {
-      setSecurityLoading(true);
-      try {
-        const [counts, top] = await Promise.all([
-          api.topologyDeviceEventCounts(token, { window_hours: correlationWindowHours }),
-          api.topAffectedDevices(token, { window_hours: correlationWindowHours, limit: 6 }),
-        ]);
-        if (!cancelled) {
-          setEventCounts(counts.devices);
-          setTopAffected(top.devices);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setTopologyError(err instanceof Error ? err.message : "Unable to load topology security overlay");
-        }
-      } finally {
-        if (!cancelled) {
-          setSecurityLoading(false);
-        }
-      }
-    }
-    loadCorrelationData();
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, canViewSecurity, correlationWindowHours, liveGraph.devices, liveGraph.relationships.length]);
 
   useEffect(() => {
     if (!livePingEnabled || !accessToken || liveGraph.devices.length === 0) {
@@ -625,7 +566,7 @@ export function TopologyWorkspace({
               height: 56,
               opacity: 0.92,
               width: 56,
-              "z-index": 50,
+              "z-index": 65,
             },
           },
           {
@@ -701,6 +642,7 @@ export function TopologyWorkspace({
               "font-size": edgeLabelFontSize,
               "font-weight": 600,
               "overlay-opacity": 0,
+              "overlay-padding": "12px",
               "text-background-color": "data(edgeLabelBg)",
               "text-background-opacity": 1,
               "text-background-padding": "5px",
@@ -778,6 +720,7 @@ export function TopologyWorkspace({
         refreshOverlayNodesRef.current();
       });
       cyRef.current.on("zoom", () => {
+        setCyZoom(cyRef.current?.zoom() ?? 1);
         refreshOverlayNodesRef.current();
       });
       cyRef.current.on("pan", () => {
@@ -852,21 +795,16 @@ export function TopologyWorkspace({
         },
       })),
       ...filteredGraph.devices.map((device) => {
-        const count = eventCountByDeviceId.get(device.id)?.event_count ?? 0;
-        const hasEvents = securityOverlayEnabled && count > 0;
         const liveStatus = liveStatusByDeviceId.get(device.id)?.status ?? device.monitor_status ?? "unknown";
         const nodeScale = (groupDisplayPrefs[device.topology_group]?.nodeScalePercent ?? 140) / 100;
         const iconSize = Math.round(30 * Math.max(0.7, Math.min(2.2, nodeScale)));
         const hitSize = Math.max(36, iconSize + 14);
         return {
           group: "nodes" as const,
-          classes: `${hasEvents ? "device security-alert" : "device"} status-${liveStatus}`,
+          classes: `device status-${liveStatus}`,
           data: {
             id: `device-${device.id}`,
-            label:
-              hasEvents
-                ? `${deviceLabel(device)}\n${count} ${count === 1 ? "event" : "events"}`
-                : deviceLabel(device),
+            label: deviceLabel(device),
             labelColor: theme === "dark" ? "#ffffff" : "#111111",
             color: device.color || statusColor(device.monitor_status ?? device.status),
             iconUrl: deviceIconUrl(device.icon, device.color || statusColor(device.monitor_status ?? device.status)),
@@ -911,7 +849,7 @@ export function TopologyWorkspace({
       cy.fit(undefined, 36);
       fitOnNextRenderRef.current = false;
     }
-  }, [activeIconPackId, eventCountByDeviceId, filteredGraph, groupDisplayPrefs, layoutRevision, liveStatusByDeviceId, securityOverlayEnabled, theme, userId]);
+  }, [activeIconPackId, filteredGraph, groupDisplayPrefs, layoutRevision, liveStatusByDeviceId, theme, userId]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -1829,10 +1767,12 @@ export function TopologyWorkspace({
                     <g dangerouslySetInnerHTML={{ __html: deviceIconPath(node.icon) }} />
                   </svg>
                 )}
-                {showNodeLabels && (
+                {showNodeLabels && cyZoom >= 0.35 && (
                   <span className="topology-overlay-label" style={{ fontSize: `${nodeLabelFontSize}px` }}>
-                    {node.lines.map((line, index) => (
-                      <span key={`${node.id}-line-${index}`}>{line}</span>
+                    {(cyZoom < 0.6 ? node.lines.slice(0, 1) : node.lines).map((line, index) => (
+                      <span key={`${node.id}-line-${index}`}>
+                        {cyZoom < 0.6 && line.length > 14 ? `${line.slice(0, 14)}…` : line}
+                      </span>
                     ))}
                   </span>
                 )}
