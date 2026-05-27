@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.4] - 2026-05-27
 
 ### Topology
 - Topology layouts and display preferences now autosave per user and sync across devices.
