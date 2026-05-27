@@ -68,8 +68,8 @@ def _sync_group_ipam_subnet(
     previous_cidr: str | None = None,
     previous_vlan: str | None = None,
 ) -> None:
-    cidr_values = []
-    vlan_values = []
+    cidr_values: list[str] = []
+    vlan_values: list[str] = []
     if group.ip_range:
         cidr_values.append(group.ip_range)
     if previous_cidr and previous_cidr != group.ip_range:
@@ -89,18 +89,30 @@ def _sync_group_ipam_subnet(
         conditions.append(Subnet.vlan_id.in_(vlan_values))
 
     matches = db.scalars(select(Subnet).where(or_(*conditions))).all()
-    seen: set[int] = set()
-    for subnet in matches:
-        if subnet.id in seen:
-            continue
-        seen.add(subnet.id)
-        if group.ip_range:
-            subnet.cidr = group.ip_range
-        subnet.vlan_id = group.vlan_id
-        subnet.gateway = group.gateway
-        subnet.dhcp_start = group.dhcp_start
-        subnet.dhcp_end = group.dhcp_end
-        subnet.dns_servers = group.dns_servers
+    if not matches:
+        return
+
+    seen: dict[int, Subnet] = {subnet.id: subnet for subnet in matches}
+
+    def match_priority(subnet: Subnet) -> tuple[int, int]:
+        if group.ip_range and subnet.cidr == group.ip_range:
+            return (0, subnet.id)
+        if group.vlan_id and subnet.vlan_id == group.vlan_id:
+            return (1, subnet.id)
+        if previous_cidr and subnet.cidr == previous_cidr:
+            return (2, subnet.id)
+        if previous_vlan and subnet.vlan_id == previous_vlan:
+            return (3, subnet.id)
+        return (4, subnet.id)
+
+    subnet = sorted(seen.values(), key=match_priority)[0]
+    if group.ip_range:
+        subnet.cidr = group.ip_range
+    subnet.vlan_id = group.vlan_id
+    subnet.gateway = group.gateway
+    subnet.dhcp_start = group.dhcp_start
+    subnet.dhcp_end = group.dhcp_end
+    subnet.dns_servers = group.dns_servers
 MAX_LIVE_STATUS_DEVICES = 64
 LIVE_STATUS_FALLBACK_PORTS = (22, 80, 443, 53)
 

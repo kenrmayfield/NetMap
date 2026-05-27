@@ -8,6 +8,7 @@
 - Link creation now uses a searchable endpoint picker.
 - Map labels and link selection are easier to use on dense topology views.
 - Firewall activity is no longer aggregated across all devices when the topology page opens; selected-device activity loads on demand.
+- Updating VLAN DNS settings no longer crashes when IPAM contains separate subnet rows matching the same VLAN and CIDR.
 
 ### Performance
 - Workspaces now load on demand, so heavier pages like Topology are not bundled into the initial app load.
