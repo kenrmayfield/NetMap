@@ -170,6 +170,9 @@ export type DiscoveryHost = {
   vendor: string | null;
   status: string;
   open_ports: number[];
+  existing_device_id: number | null;
+  import_status: "new" | "existing" | "changed";
+  proposed_updates: Array<"hostname" | "mac_address" | "vendor">;
 };
 
 export type DiscoveryScan = {
@@ -188,6 +191,7 @@ export type DiscoveryScan = {
 export type DiscoveryImportResult = {
   created: number;
   updated: number;
+  skipped_existing: number;
 };
 
 export type SnmpInterfaceResult = {
@@ -484,9 +488,12 @@ export type AlertEvent = {
 };
 
 export type PortResult = {
+  target_id: number | null;
   port: number;
   label: string;
+  check_type: "tcp";
   open: boolean;
+  status: string | null;
 };
 
 export type MonitorHistoryPoint = {
@@ -530,6 +537,8 @@ export type PortTarget = {
   device_id: number | null;
   port: number;
   label: string;
+  check_type: "tcp";
+  enabled: boolean;
   created_at: string;
 };
 
@@ -1022,11 +1031,26 @@ export const api = {
       token,
       body: JSON.stringify(payload),
     }),
-  importDiscoveryResults: (token: string, scanId: number, ipAddresses: string[], topologyGroupId?: number | null, siteId?: number | null) =>
+  importDiscoveryResults: (
+    token: string,
+    scanId: number,
+    ipAddresses: string[],
+    topologyGroupId?: number | null,
+    siteId?: number | null,
+    mode?: "new_only" | "fill_missing" | "override_existing",
+    updateFields?: Array<"hostname" | "mac_address" | "vendor">,
+  ) =>
     request<DiscoveryImportResult>("/api/v1/discovery/import", {
       method: "POST",
       token,
-      body: JSON.stringify({ scan_id: scanId, ip_addresses: ipAddresses, topology_group_id: topologyGroupId ?? null, site_id: siteId ?? null }),
+      body: JSON.stringify({
+        scan_id: scanId,
+        ip_addresses: ipAddresses,
+        topology_group_id: topologyGroupId ?? null,
+        site_id: siteId ?? null,
+        mode: mode ?? "fill_missing",
+        update_fields: updateFields ?? ["hostname", "mac_address", "vendor"],
+      }),
     }),
   syslogStatus: (token: string) => request<SyslogStatus>("/api/v1/syslog/status", { token }),
   firewallEvents: (token: string, params: FirewallEventSearchParams = {}) => {
@@ -1264,11 +1288,11 @@ export const api = {
   getDeviceAnalysis: (token: string, deviceId: number) =>
     request<DeviceAnalysis>(`/api/v1/monitoring/devices/${deviceId}/analysis`, { token }),
   listPortTargets: (token: string) =>
-    request<PortTarget[]>("/api/v1/monitoring/port-targets", { token }),
-  createPortTarget: (token: string, payload: { device_id: number | null; port: number; label: string }) =>
-    request<PortTarget>("/api/v1/monitoring/port-targets", { method: "POST", token, body: JSON.stringify(payload) }),
+    request<PortTarget[]>("/api/v1/monitoring/service-checks", { token }),
+  createPortTarget: (token: string, payload: { device_id: number | null; port: number; label: string; check_type?: "tcp"; enabled?: boolean }) =>
+    request<PortTarget>("/api/v1/monitoring/service-checks", { method: "POST", token, body: JSON.stringify(payload) }),
   deletePortTarget: (token: string, id: number) =>
-    request<void>(`/api/v1/monitoring/port-targets/${id}`, { method: "DELETE", token }),
+    request<void>(`/api/v1/monitoring/service-checks/${id}`, { method: "DELETE", token }),
   // IPAM
   getIpamSummary: (token: string) =>
     request<IpamSummary>("/api/v1/ipam/summary", { token }),

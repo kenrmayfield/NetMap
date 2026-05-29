@@ -93,6 +93,7 @@ export function MonitoringWorkspace({
   const [showPortForm, setShowPortForm] = useState(false);
   const [portFormPort, setPortFormPort] = useState("");
   const [portFormLabel, setPortFormLabel] = useState("");
+  const [portFormScope, setPortFormScope] = useState<"global" | "device">("global");
   const [portBusy, setPortBusy] = useState(false);
   const [portError, setPortError] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
@@ -273,14 +274,21 @@ export function MonitoringWorkspace({
     const port = parseInt(portFormPort, 10);
     if (!port || port < 1 || port > 65535) { setPortError("Invalid port"); return; }
     if (!portFormLabel.trim()) { setPortError("Label required"); return; }
+    if (portFormScope === "device" && selectedId === null) { setPortError("Select a device first"); return; }
     setPortBusy(true);
     setPortError(null);
     try {
-      await api.createPortTarget(accessToken, { device_id: null, port, label: portFormLabel.trim() });
-      setPortFormPort(""); setPortFormLabel(""); setShowPortForm(false);
+      await api.createPortTarget(accessToken, {
+        device_id: portFormScope === "device" ? selectedId : null,
+        port,
+        label: portFormLabel.trim(),
+        check_type: "tcp",
+        enabled: true,
+      });
+      setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global"); setShowPortForm(false);
       setPortTargets(await api.listPortTargets(accessToken));
     } catch {
-      setPortError("Failed to add port target");
+      setPortError("Failed to add service check");
     } finally {
       setPortBusy(false);
     }
@@ -320,6 +328,7 @@ export function MonitoringWorkspace({
 
   const canManagePorts = userRole === "SuperAdmin" || userRole === "NetworkAdmin";
   const globalPortTargets = portTargets.filter((p) => p.device_id === null);
+  const selectedPortTargets = selectedId === null ? [] : portTargets.filter((p) => p.device_id === selectedId);
 
   return (
     <section className="dash-layout">
@@ -465,7 +474,7 @@ export function MonitoringWorkspace({
                       <div className="mon-col-resize-handle" onMouseDown={(e) => startColResize(3, e)} />
                     </th>
                     <th>
-                      Ports
+                      Services
                       <div className="mon-col-resize-handle" onMouseDown={(e) => startColResize(4, e)} />
                     </th>
                     <th>
@@ -503,7 +512,7 @@ export function MonitoringWorkspace({
                         ) : (
                           <span className="mon-port-badges">
                             {d.latest_port_results.map((r) => (
-                              <span key={r.port} className={`mon-port-badge mon-port-badge--${r.open ? "open" : "closed"}`} title={`${r.label} :${r.port}`}>{r.label}</span>
+                              <span key={r.target_id ?? `${r.label}-${r.port}`} className={`mon-port-badge mon-port-badge--${r.open ? "open" : "closed"}`} title={`${r.label} :${r.port}`}>{r.label}</span>
                             ))}
                           </span>
                         )}
@@ -527,10 +536,10 @@ export function MonitoringWorkspace({
           </div>
         </div>
 
-        {/* Monitored ports sidebar */}
+        {/* Service checks sidebar */}
         <div className="dash-panel mon-ports-sidebar">
           <div className="dash-panel-header">
-            <span className="dash-panel-title">Monitored ports</span>
+            <span className="dash-panel-title">Service checks</span>
             {canManagePorts && (
               <button
                 type="button"
@@ -555,18 +564,26 @@ export function MonitoringWorkspace({
                 <input
                   className="mon-port-input"
                   type="text"
-                  placeholder="Label (e.g. RDP)"
+                  placeholder="Service name (e.g. RDP)"
                   value={portFormLabel}
                   onChange={(e) => setPortFormLabel(e.target.value)}
                   maxLength={60}
                 />
+                <select
+                  className="mon-port-input"
+                  value={portFormScope}
+                  onChange={(e) => setPortFormScope(e.target.value as "global" | "device")}
+                >
+                  <option value="global">All devices</option>
+                  <option value="device" disabled={selectedId === null}>Selected device</option>
+                </select>
                 <button type="submit" disabled={portBusy}>Add</button>
                 {portError && <span className="form-error">{portError}</span>}
               </form>
             )}
             <div className="mon-port-chips">
               {globalPortTargets.length === 0 && !showPortForm && (
-                <p className="dash-empty" style={{ margin: 0 }}>No ports configured.</p>
+                <p className="dash-empty" style={{ margin: 0 }}>No service checks configured.</p>
               )}
               {globalPortTargets.map((p) => (
                 <span key={p.id} className="mon-port-chip">
@@ -585,6 +602,31 @@ export function MonitoringWorkspace({
                 </span>
               ))}
             </div>
+            {selectedDevice && (
+              <div className="mon-port-chips" style={{ marginTop: 10 }}>
+                <span className="dash-panel-meta" style={{ width: "100%" }}>
+                  {selectedDevice.display_name ?? selectedDevice.hostname ?? selectedDevice.ip_address}
+                </span>
+                {selectedPortTargets.length === 0 ? (
+                  <p className="dash-empty" style={{ margin: 0 }}>No device-specific checks.</p>
+                ) : selectedPortTargets.map((p) => (
+                  <span key={p.id} className="mon-port-chip">
+                    {p.label}
+                    <span className="mon-port-chip-port">:{p.port}</span>
+                    {canManagePorts && (
+                      <button
+                        type="button"
+                        className="mon-port-chip-del"
+                        onClick={() => void removePortTarget(p.id)}
+                        title={`Remove ${p.label}`}
+                      >
+                        <X size={11} />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -705,12 +747,12 @@ export function MonitoringWorkspace({
                   {selectedDevice.latest_port_results.length > 0 && (
                     <div className="mon-hero-section">
                       <div className="mon-hero-section-title">
-                        Port status
+                        Service status
                         <span className="dash-panel-meta">latest check</span>
                       </div>
                       <div className="mon-port-rows">
                         {selectedDevice.latest_port_results.map((r) => (
-                          <div key={r.port} className="mon-port-row">
+                          <div key={r.target_id ?? `${r.label}-${r.port}`} className="mon-port-row">
                             <span className={`mon-dot mon-dot-${r.open ? "online" : "offline"}`} />
                             <span className="mon-port-label">{r.label}</span>
                             <span className="dash-panel-meta">:{r.port}</span>

@@ -120,6 +120,7 @@ def apply_sqlite_schema_updates() -> None:
         _run_migration(conn, inspector, "0028_topology_layouts", _migrate_topology_layouts)
         _run_migration(conn, inspector, "0029_topology_layout_display_prefs", _migrate_topology_layout_display_prefs)
         _run_migration(conn, inspector, "0030_snmp_profiles", _migrate_snmp_profiles)
+        _run_migration(conn, inspector, "0031_service_check_fields", _migrate_service_check_fields)
 
 
 def _run_migration(conn, inspector, name: str, fn) -> None:
@@ -208,6 +209,8 @@ def _migrate_topology_group_backfill(conn, inspector) -> None:
             """
         )
     )
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_subnets_id ON subnets (id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_subnets_site_id ON subnets (site_id)"))
 
 
 def _migrate_user_profile_columns(conn, inspector) -> None:
@@ -377,6 +380,8 @@ def _migrate_port_targets(conn, inspector) -> None:
                 device_id INTEGER REFERENCES devices(id) ON DELETE CASCADE,
                 port INTEGER NOT NULL,
                 label VARCHAR(60) NOT NULL,
+                check_type VARCHAR(20) NOT NULL DEFAULT 'tcp',
+                enabled BOOLEAN NOT NULL DEFAULT 1,
                 created_at DATETIME NOT NULL
             )
             """
@@ -431,8 +436,16 @@ def _migrate_subnets(conn, inspector) -> None:
             """
         )
     )
-    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_subnets_id ON subnets (id)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_subnets_site_id ON subnets (site_id)"))
+
+
+def _migrate_service_check_fields(conn, inspector) -> None:
+    if "device_port_targets" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("device_port_targets")}
+    if "check_type" not in existing:
+        conn.execute(text("ALTER TABLE device_port_targets ADD COLUMN check_type VARCHAR(20) NOT NULL DEFAULT 'tcp'"))
+    if "enabled" not in existing:
+        conn.execute(text("ALTER TABLE device_port_targets ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT 1"))
 
 
 def _migrate_role_varchar(conn, inspector) -> None:

@@ -6,9 +6,12 @@ from pydantic import BaseModel, Field
 
 
 class PortResult(BaseModel):
+    target_id: int | None = None
     port: int
     label: str
+    check_type: str = "tcp"
     open: bool
+    status: str | None = None
 
 
 class MonitorHistoryPoint(BaseModel):
@@ -73,6 +76,8 @@ class PortTargetOut(BaseModel):
     device_id: int | None
     port: int
     label: str
+    check_type: str = "tcp"
+    enabled: bool = True
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -82,3 +87,5 @@ class PortTargetCreate(BaseModel):
     device_id: int | None = None
     port: int = Field(..., ge=1, le=65535)
     label: str = Field(..., min_length=1, max_length=60)
+    check_type: str = Field(default="tcp", pattern="^tcp$")
+    enabled: bool = True

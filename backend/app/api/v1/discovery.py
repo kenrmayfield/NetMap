@@ -54,6 +54,7 @@ def enforce_rate_limit(user_id: int) -> None:
 
 
 def scan_to_read(scan: DiscoveryScan) -> DiscoveryScanRead:
+    results = deserialize_results(scan.results_json)
     return DiscoveryScanRead(
         id=scan.id,
         target=scan.target,
@@ -61,11 +62,38 @@ def scan_to_read(scan: DiscoveryScan) -> DiscoveryScanRead:
         status=scan.status,
         host_count=scan.host_count,
         result_count=scan.result_count,
-        results=deserialize_results(scan.results_json),
+        results=results,
         error=scan.error,
         created_at=scan.created_at,
         completed_at=scan.completed_at,
     )
+
+
+def scan_to_read_with_inventory(scan: DiscoveryScan, db: Session) -> DiscoveryScanRead:
+    read = scan_to_read(scan)
+    if not read.results:
+        return read
+    ips = [host.ip_address for host in read.results]
+    existing_by_ip = {
+        device.ip_address: device
+        for device in db.scalars(select(Device).where(Device.ip_address.in_(ips))).all()
+    }
+    for host in read.results:
+        existing = existing_by_ip.get(host.ip_address)
+        if existing is None:
+            host.import_status = "new"
+            continue
+        host.existing_device_id = existing.id
+        proposed: list[str] = []
+        if host.hostname and host.hostname != existing.hostname:
+            proposed.append("hostname")
+        if host.mac_address and host.mac_address != existing.mac_address:
+            proposed.append("mac_address")
+        if host.vendor and host.vendor != existing.vendor:
+            proposed.append("vendor")
+        host.proposed_updates = proposed
+        host.import_status = "changed" if proposed else "existing"
+    return read
 
 
 @router.post("/scans", response_model=DiscoveryScanRead, status_code=status.HTTP_201_CREATED)
@@ -156,7 +184,7 @@ def start_scan(
         )
     db.commit()
     db.refresh(scan)
-    return scan_to_read(scan)
+    return scan_to_read_with_inventory(scan, db)
 
 
 @router.get("/scans", response_model=list[DiscoveryScanRead])
@@ -165,7 +193,7 @@ def list_scans(
     db: Annotated[Session, Depends(get_db)],
 ) -> list[DiscoveryScanRead]:
     scans = db.scalars(select(DiscoveryScan).order_by(DiscoveryScan.created_at.desc()).limit(20)).all()
-    return [scan_to_read(scan) for scan in scans]
+    return [scan_to_read_with_inventory(scan, db) for scan in scans]
 
 
 @router.post("/import", response_model=DiscoveryImportResult)
@@ -188,21 +216,36 @@ def import_scan_results(
     ]
     created = 0
     updated = 0
+    skipped_existing = 0
     for result in results:
         existing = db.scalar(select(Device).where(Device.ip_address == result.ip_address))
         if existing is None:
             db.add(discovery_result_to_device(result, topology_group_id=payload.topology_group_id, site_id=payload.site_id))
             created += 1
             continue
-        existing.hostname = result.hostname or existing.hostname
-        existing.mac_address = result.mac_address or existing.mac_address
-        existing.vendor = result.vendor or existing.vendor
+        if payload.mode == "new_only":
+            skipped_existing += 1
+            continue
+
+        changed = False
+        for field_name in payload.update_fields:
+            discovered_value = getattr(result, field_name)
+            if not discovered_value:
+                continue
+            current_value = getattr(existing, field_name)
+            should_update = payload.mode == "override_existing" or not current_value
+            if should_update and current_value != discovered_value:
+                setattr(existing, field_name, discovered_value)
+                changed = True
         existing.status = "online"
         if payload.topology_group_id is not None:
             existing.topology_group_id = payload.topology_group_id
+            changed = True
         if payload.site_id is not None:
             existing.site_id = payload.site_id
-        updated += 1
+            changed = True
+        if changed:
+            updated += 1
 
     if payload.topology_group_id is not None and "/" in scan.target:
         group = db.get(TopologyGroup, payload.topology_group_id)
@@ -214,10 +257,10 @@ def import_scan_results(
         action="discovery.results_imported",
         actor_user_id=current_user.id,
         target=f"scan:{scan.id}",
-        detail=f"created={created} updated={updated}",
+        detail=f"created={created} updated={updated} skipped_existing={skipped_existing} mode={payload.mode}",
     )
     db.commit()
-    return DiscoveryImportResult(created=created, updated=updated)
+    return DiscoveryImportResult(created=created, updated=updated, skipped_existing=skipped_existing)
 
 
 def discovery_result_to_device(result: DiscoveryHost, topology_group_id: int | None = None, site_id: int | None = None) -> Device:

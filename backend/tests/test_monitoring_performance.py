@@ -102,3 +102,58 @@ def test_monitoring_heartbeat_is_capped_but_uptime_uses_full_24h_window():
     assert len(summary.heartbeat) == 50
     assert summary.uptime_24h == 0.5
     assert summary.avg_rtt_24h == 29.5
+
+
+def test_monitoring_service_results_parse_legacy_and_rich_history_rows():
+    db = _session()
+    now = datetime.now(timezone.utc)
+    legacy = Device(
+        display_name="Legacy",
+        ip_address="10.0.0.30",
+        status="online",
+        monitor_status="online",
+        last_monitored_at=now,
+        updated_at=now,
+    )
+    rich = Device(
+        display_name="Rich",
+        ip_address="10.0.0.31",
+        status="online",
+        monitor_status="online",
+        last_monitored_at=now,
+        updated_at=now,
+    )
+    db.add_all([legacy, rich])
+    db.commit()
+    db.refresh(legacy)
+    db.refresh(rich)
+
+    db.add_all([
+        DeviceMonitorHistory(
+            device_id=legacy.id,
+            checked_at=now,
+            status="online",
+            rtt_ms=1.0,
+            port_results='[{"port": 443, "label": "HTTPS", "open": true}]',
+        ),
+        DeviceMonitorHistory(
+            device_id=rich.id,
+            checked_at=now,
+            status="online",
+            rtt_ms=1.0,
+            port_results='[{"target_id": 7, "port": 8443, "label": "Admin UI", "check_type": "tcp", "open": false, "status": "closed"}]',
+        ),
+    ])
+    db.commit()
+
+    summaries = {row.display_name: row for row in _build_device_summaries(db, [legacy, rich])}
+
+    legacy_result = summaries["Legacy"].latest_port_results[0]
+    assert legacy_result.target_id is None
+    assert legacy_result.check_type == "tcp"
+    assert legacy_result.status is None
+
+    rich_result = summaries["Rich"].latest_port_results[0]
+    assert rich_result.target_id == 7
+    assert rich_result.label == "Admin UI"
+    assert rich_result.status == "closed"

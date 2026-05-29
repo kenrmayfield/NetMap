@@ -400,14 +400,16 @@ def device_analysis(
     )
 
 
+@router.get("/service-checks", response_model=list[PortTargetOut])
 @router.get("/port-targets", response_model=list[PortTargetOut])
 def list_port_targets(
     _current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[PortTargetOut]:
-    return list(db.scalars(select(DevicePortTarget).order_by(DevicePortTarget.device_id.nulls_first(), DevicePortTarget.port)))
+    return list(db.scalars(select(DevicePortTarget).order_by(DevicePortTarget.device_id.nulls_first(), DevicePortTarget.label)))
 
 
+@router.post("/service-checks", response_model=PortTargetOut, status_code=201)
 @router.post("/port-targets", response_model=PortTargetOut, status_code=201)
 def create_port_target(
     payload: PortTargetCreate,
@@ -416,10 +418,14 @@ def create_port_target(
 ) -> PortTargetOut:
     if current_user.role not in ("SuperAdmin", "NetworkAdmin"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if payload.device_id is not None and db.get(Device, payload.device_id) is None:
+        raise HTTPException(status_code=404, detail="Device not found")
     target = DevicePortTarget(
         device_id=payload.device_id,
         port=payload.port,
         label=payload.label,
+        check_type=payload.check_type,
+        enabled=payload.enabled,
     )
     db.add(target)
     db.commit()
@@ -427,6 +433,7 @@ def create_port_target(
     return target
 
 
+@router.delete("/service-checks/{target_id}", status_code=204, response_model=None)
 @router.delete("/port-targets/{target_id}", status_code=204, response_model=None)
 def delete_port_target(
     target_id: int,

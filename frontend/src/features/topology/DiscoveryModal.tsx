@@ -43,6 +43,8 @@ export function DiscoveryModal({
   const [snmpTimeout, setSnmpTimeout] = useState("3");
   const [scan, setScan] = useState<DiscoveryScan | null>(null);
   const [selectedIps, setSelectedIps] = useState<Set<string>>(new Set());
+  const [importMode, setImportMode] = useState<"new_only" | "fill_missing" | "override_existing">("fill_missing");
+  const [updateFields, setUpdateFields] = useState<Array<"hostname" | "mac_address" | "vendor">>(["hostname", "mac_address", "vendor"]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const targetEstimate = estimateScanTarget(target);
@@ -143,7 +145,7 @@ export function DiscoveryModal({
     try {
       const resolvedGroupId = selectedGroupId ? Number(selectedGroupId) : null;
       const siteId = selectedSiteId ? Number(selectedSiteId) : null;
-      await api.importDiscoveryResults(accessToken, scan.id, [...selectedIps], resolvedGroupId, siteId);
+      await api.importDiscoveryResults(accessToken, scan.id, [...selectedIps], resolvedGroupId, siteId, importMode, updateFields);
       await onImported();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed");
@@ -163,6 +165,20 @@ export function DiscoveryModal({
       return next;
     });
   }
+
+  function toggleUpdateField(field: "hostname" | "mac_address" | "vendor") {
+    setUpdateFields((current) =>
+      current.includes(field) ? current.filter((value) => value !== field) : [...current, field],
+    );
+  }
+
+  const scanCounts = scan?.results.reduce(
+    (counts, host) => {
+      counts[host.import_status] += 1;
+      return counts;
+    },
+    { new: 0, existing: 0, changed: 0 },
+  ) ?? { new: 0, existing: 0, changed: 0 };
 
   return (
     <Modal title="Discover devices" onCancel={onCancel}>
@@ -333,6 +349,9 @@ export function DiscoveryModal({
             <span>
               hosts found from {scan.host_count} target addresses · {scan.scan_type} · {scan.status}
             </span>
+            <span className="dash-panel-meta">
+              {scanCounts.new} new · {scanCounts.changed} changed · {scanCounts.existing} already known
+            </span>
           </div>
           {scan.results.length === 0 ? (
             <div className="empty-results">No hosts responded to this scan.</div>
@@ -343,7 +362,7 @@ export function DiscoveryModal({
                 <span>IP address</span>
                 <span>Hostname</span>
                 <span>MAC / vendor</span>
-                <span>Ports</span>
+                <span>Status / ports</span>
               </div>
               <div className="scan-table">
                 {scan.results.map((host) => (
@@ -356,13 +375,63 @@ export function DiscoveryModal({
                     <span>{host.ip_address}</span>
                     <span>{host.hostname || "No hostname"}</span>
                     <span>{host.vendor || host.mac_address || "No MAC/vendor"}</span>
-                    <span>{host.open_ports.length ? host.open_ports.join(", ") : "No open ports"}</span>
+                    <span>
+                      <strong>
+                        {host.import_status === "new" ? "New" : host.import_status === "changed" ? "Update available" : "Known"}
+                      </strong>
+                      {host.proposed_updates.length > 0 && (
+                        <span className="dash-panel-meta"> · {host.proposed_updates.join(", ")}</span>
+                      )}
+                      <span className="dash-panel-meta">
+                        {" · "}{host.open_ports.length ? host.open_ports.join(", ") : "No open ports"}
+                      </span>
+                    </span>
                   </label>
                 ))}
               </div>
+              <div className="scan-target-info">
+                <label>
+                  Existing devices
+                  <select value={importMode} onChange={(event) => setImportMode(event.target.value as typeof importMode)}>
+                    <option value="new_only">Import new devices only</option>
+                    <option value="fill_missing">Fill missing fields only</option>
+                    <option value="override_existing">Override selected existing fields</option>
+                  </select>
+                </label>
+                <div className="scan-confirm-check" style={{ alignItems: "flex-start" }}>
+                  <span className="dash-panel-meta">Fields</span>
+                  <label>
+                    <input
+                      checked={updateFields.includes("hostname")}
+                      disabled={importMode === "new_only"}
+                      type="checkbox"
+                      onChange={() => toggleUpdateField("hostname")}
+                    />
+                    Hostname
+                  </label>
+                  <label>
+                    <input
+                      checked={updateFields.includes("mac_address")}
+                      disabled={importMode === "new_only"}
+                      type="checkbox"
+                      onChange={() => toggleUpdateField("mac_address")}
+                    />
+                    MAC
+                  </label>
+                  <label>
+                    <input
+                      checked={updateFields.includes("vendor")}
+                      disabled={importMode === "new_only"}
+                      type="checkbox"
+                      onChange={() => toggleUpdateField("vendor")}
+                    />
+                    Vendor
+                  </label>
+                </div>
+              </div>
               <div className="modal-actions scan-import-actions">
                 <button type="button" className="ipam-btn ipam-btn--primary" disabled={busy || selectedIps.size === 0} onClick={() => void importSelected()}>
-                  Import selected
+                  Apply selected
                 </button>
               </div>
             </>

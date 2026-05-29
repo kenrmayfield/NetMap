@@ -7,6 +7,7 @@ from app.core.validation import normalize_ip
 
 
 ScanType = Literal["ping", "basic_ports"]
+DiscoveryImportMode = Literal["new_only", "fill_missing", "override_existing"]
 
 
 class DiscoveryStart(BaseModel):
@@ -33,6 +34,9 @@ class DiscoveryHost(BaseModel):
     vendor: str | None = None
     status: str = "unknown"
     open_ports: list[int] = Field(default_factory=list)
+    existing_device_id: int | None = None
+    import_status: Literal["new", "existing", "changed"] = "new"
+    proposed_updates: list[str] = Field(default_factory=list)
 
     @field_validator("ip_address")
     @classmethod
@@ -58,6 +62,10 @@ class DiscoveryImportRequest(BaseModel):
     ip_addresses: list[str] = Field(default_factory=list)
     topology_group_id: int | None = None
     site_id: int | None = None
+    mode: DiscoveryImportMode = "fill_missing"
+    update_fields: list[Literal["hostname", "mac_address", "vendor"]] = Field(
+        default_factory=lambda: ["hostname", "mac_address", "vendor"]
+    )
 
     @field_validator("ip_addresses")
     @classmethod
@@ -68,3 +76,4 @@ class DiscoveryImportRequest(BaseModel):
 class DiscoveryImportResult(BaseModel):
     created: int
     updated: int
+    skipped_existing: int = 0

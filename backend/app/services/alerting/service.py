@@ -74,18 +74,18 @@ class AlertMonitorService:
             rules = db.scalars(select(AlertRule).where(AlertRule.enabled == True)).all()  # noqa: E712
             notif_settings = load_notification_settings(db)
             app_name = self._get_app_name(db)
-            port_targets = db.scalars(select(DevicePortTarget)).all()
+        port_targets = db.scalars(select(DevicePortTarget).where(DevicePortTarget.enabled == True)).all()  # noqa: E712
 
         if not devices:
             self._initialized = True
             return
 
         # Build per-device port list (global targets + device-specific)
-        global_ports = [(pt.port, pt.label) for pt in port_targets if pt.device_id is None]
-        device_extra_ports: dict[int, list[tuple[int, str]]] = {}
+        global_ports = [pt for pt in port_targets if pt.device_id is None]
+        device_extra_ports: dict[int, list[DevicePortTarget]] = {}
         for pt in port_targets:
             if pt.device_id is not None:
-                device_extra_ports.setdefault(pt.device_id, []).append((pt.port, pt.label))
+                device_extra_ports.setdefault(pt.device_id, []).append(pt)
 
         checked_at = datetime.now(timezone.utc)
         current: dict[int, str] = {}
@@ -108,9 +108,16 @@ class AlertMonitorService:
             # Port checks
             ports_to_check = global_ports + device_extra_ports.get(device.id, [])
             port_results = []
-            for port, label in ports_to_check:
-                open_ = check_port(device.ip_address, port)
-                port_results.append({"port": port, "label": label, "open": open_})
+            for target in ports_to_check:
+                open_ = check_port(device.ip_address, target.port)
+                port_results.append({
+                    "target_id": target.id,
+                    "port": target.port,
+                    "label": target.label,
+                    "check_type": target.check_type,
+                    "open": open_,
+                    "status": "open" if open_ else "closed",
+                })
             port_map[device.id] = port_results
 
         # Persist history and update device monitor_status
