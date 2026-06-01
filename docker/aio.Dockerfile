@@ -9,7 +9,9 @@ RUN npm run build
 FROM python:3.12-slim AS runtime
 
 ARG APP_VERSION=dev
+ARG APP_CHANNEL=
 ENV APP_VERSION=$APP_VERSION
+ENV APP_CHANNEL=$APP_CHANNEL
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -59,7 +61,6 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY backend/app ./app
 COPY VERSION /app/VERSION
-COPY VERSION_CHANNEL /app/VERSION_CHANNEL
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 COPY docker/aio-nginx.conf.template /etc/netmap/aio-nginx.conf.template
 COPY docker/aio-entrypoint.sh /usr/local/bin/netmap-aio-entrypoint

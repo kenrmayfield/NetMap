@@ -67,5 +67,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ github.ref_name }}
+            APP_CHANNEL=${{ github.ref_name == 'test' && 'Test' || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
