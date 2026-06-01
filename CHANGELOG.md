@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.2.6] - 2026-06-01
+
+### Discovery
+- Added discovery result review for rescans: scan results now show whether each host is new, already known, or has changed inventory fields.
+- Discovery import can now add only new devices, fill missing hostname/MAC/vendor values, or explicitly override selected existing fields.
+- Discovery can enrich missing MAC/vendor details from router or L3-switch SNMP ARP tables, including a default ARP source from the selected VLAN/group gateway when available.
+
+### SNMP
+- Added an SNMPv2c probe tool for system identity, interface state, and ARP table reads.
+- Added encrypted SNMP credential profiles managed from Admin -> Credentials.
+- Devices can be assigned SNMP profiles, and router/L3-switch details can preview and apply ARP-table enrichment to matching inventory devices.
+
+### Monitoring
+- Added the first named service-check foundation: TCP service checks can be managed globally or per device through Monitoring.
+- Monitor history now stores richer service result metadata while retaining compatibility with existing port-result rows.
+- Admin live-ping changes now update the app shell immediately; Inventory, Topology, and Monitoring clearly show when live polling is disabled.
+
+### Version Display
+- Dev and test builds can display channel labels such as `Dev: 1.2.6` or `Test: 1.2.6` when a `VERSION_CHANNEL` file is present.
+- Version checking now treats a local candidate version ahead of the latest production tag as up to date.
+
+---
+
 ## [1.2.5] - 2026-05-27
 
 ### Docker / Runtime

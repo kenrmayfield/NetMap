@@ -28,6 +28,10 @@ export function Sidebar({
   onNavigate: (route: AppRoute) => void;
   versionInfo: VersionInfo | null;
 }) {
+  const versionLabel = versionInfo
+    ? `${versionInfo.channel ? `${versionInfo.channel}: ` : "v"}${versionInfo.current}`
+    : "";
+
   return (
     <aside className={collapsed ? "sidebar sidebar--collapsed" : "sidebar"} aria-label="Primary navigation">
       <div className="brand">
@@ -80,10 +84,10 @@ export function Sidebar({
         {!collapsed && "Sign out"}
       </button>
       {versionInfo && (
-        <div className="sidebar-version" title={collapsed ? `v${versionInfo.current}` : undefined}>
+        <div className="sidebar-version" title={collapsed ? versionLabel : undefined}>
           {!collapsed && (
             <span>
-              v{versionInfo.current}
+              {versionLabel}
               {!versionInfo.up_to_date && versionInfo.latest && (
                 <a href={versionInfo.release_url} target="_blank" rel="noreferrer" className="sidebar-version-update">
                   {" "}↑ v{versionInfo.latest}

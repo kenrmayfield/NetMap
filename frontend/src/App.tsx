@@ -465,6 +465,7 @@ export function App() {
               setCurrentRoute(route);
               window.scrollTo({ top: 0, behavior: "smooth" });
             }}
+            onSettingsChange={setAppSettings}
             onUserUpdate={setUser}
             theme={theme}
             summary={summary}

@@ -665,6 +665,7 @@ export type VlanSuggestion = {
 
 export type VersionInfo = {
   current: string;
+  channel: string | null;
   latest: string | null;
   up_to_date: boolean;
   release_url: string;
