@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -14,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_super_admin
-from app.core.config import installed_app_version, settings
+from app.core.config import installed_app_channel, installed_app_version, settings
 from app.db.session import get_db
 from app.models.device import Device
 from app.models.monitor_history import DeviceMonitorHistory
@@ -39,7 +40,6 @@ def _fetch_latest_version() -> str | None:
         return _cached_latest
     try:
         import json
-        import re
         url = f"https://api.github.com/repos/{_GITHUB_REPO}/tags?per_page=10"
         req = urllib.request.Request(
             url,
@@ -59,13 +59,23 @@ def _fetch_latest_version() -> str | None:
     return None
 
 
+def _version_tuple(version: str) -> tuple[int, int, int] | None:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version.strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
 @router.get("/version")
 def get_version() -> dict:
     current = installed_app_version(settings.app_version).lstrip("v")
     latest = _fetch_latest_version()
-    up_to_date = latest is None or latest == current
+    current_tuple = _version_tuple(current)
+    latest_tuple = _version_tuple(latest) if latest else None
+    up_to_date = latest_tuple is None or (current_tuple is not None and current_tuple >= latest_tuple)
     return {
         "current": current,
+        "channel": installed_app_channel(),
         "latest": latest,
         "up_to_date": up_to_date,
         "release_url": f"https://github.com/{_GITHUB_REPO}",

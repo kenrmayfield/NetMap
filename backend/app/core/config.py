@@ -11,6 +11,11 @@ VERSION_FILE_CANDIDATES = (
     Path(__file__).resolve().parents[3] / "VERSION",
 )
 
+VERSION_CHANNEL_FILE_CANDIDATES = (
+    Path("/app/VERSION_CHANNEL"),
+    Path(__file__).resolve().parents[3] / "VERSION_CHANNEL",
+)
+
 
 def _read_version_file() -> str:
     for path in VERSION_FILE_CANDIDATES:
@@ -28,6 +33,18 @@ def installed_app_version(configured_version: str | None = None) -> str:
     if version != "dev":
         return version
     return (configured_version or os.getenv("APP_VERSION") or version).strip() or "dev"
+
+
+def installed_app_channel() -> str | None:
+    for path in VERSION_CHANNEL_FILE_CANDIDATES:
+        try:
+            channel = path.read_text().strip()
+            if channel:
+                return channel
+        except OSError:
+            continue
+    channel = os.getenv("APP_CHANNEL", "").strip()
+    return channel or None
 
 
 class Settings(BaseSettings):
