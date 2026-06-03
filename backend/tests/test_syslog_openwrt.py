@@ -28,6 +28,31 @@ def test_openwrt_kernel_firewall_log_parses_uppercase_iptables_fields():
     assert parsed.direction == "in"
 
 
+def test_openwrt_banip_prefix_parses_action_rule_and_reason():
+    raw = (
+        "<4>Jun  2 08:55:58 OpenWrt kernel: [4970621.188296] "
+        "banIP/inp-wan/drp/firehol1v4: IN=eth0.2 OUT= "
+        "MAC=9c:3d:cf:f1:4b:6b:80:ab:4d:7d:94:62:08:00:45:00:00:3c "
+        "SRC=66.132.172.154 DST=203.0.113.10 LEN=60 TOS=0x00 PREC=0x00 TTL=53 "
+        "ID=34698 PROTO=TCP SPT=32258 DPT=55720 WINDOW=42340 RES=0x00 SYN URGP=0"
+    )
+
+    parsed = parse_syslog_line(raw, "192.168.1.1")
+
+    assert parsed.source_host == "OpenWrt"
+    assert parsed.src_ip == "66.132.172.154"
+    assert parsed.dst_ip == "203.0.113.10"
+    assert parsed.src_port == 32258
+    assert parsed.dst_port == 55720
+    assert parsed.protocol == "tcp"
+    assert parsed.interface == "eth0.2"
+    assert parsed.direction == "in"
+    assert parsed.action == "drop"
+    assert parsed.tracker_id == "banIP"
+    assert parsed.rule_id == "firehol1v4"
+    assert parsed.reason == "banIP inp-wan"
+
+
 def test_syslog_ingestion_counters_track_stored_and_unparsed(monkeypatch):
     engine = create_engine(
         "sqlite://",

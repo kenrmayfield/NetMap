@@ -1,9 +1,11 @@
 import json
+import re
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 VALID_EVENT_TYPES = {"device_offline", "device_online", "device_warning", "any_status_change"}
 VALID_CHANNELS = {"smtp", "ntfy", "telegram", "signal"}
+PROFILE_TARGET_RE = re.compile(r"^profile:[1-9][0-9]*$")
 
 
 class AlertRuleCreate(BaseModel):
@@ -24,7 +26,7 @@ class AlertRuleCreate(BaseModel):
     @field_validator("channels")
     @classmethod
     def validate_channels(cls, v: list[str]) -> list[str]:
-        invalid = set(v) - VALID_CHANNELS
+        invalid = {channel for channel in v if channel not in VALID_CHANNELS and not PROFILE_TARGET_RE.match(channel)}
         if invalid:
             raise ValueError(f"Invalid channels: {invalid}")
         return v
@@ -43,6 +45,16 @@ class AlertRuleUpdate(BaseModel):
     def validate_event_type(cls, v: str | None) -> str | None:
         if v is not None and v not in VALID_EVENT_TYPES:
             raise ValueError(f"event_type must be one of {sorted(VALID_EVENT_TYPES)}")
+        return v
+
+    @field_validator("channels")
+    @classmethod
+    def validate_channels(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        invalid = {channel for channel in v if channel not in VALID_CHANNELS and not PROFILE_TARGET_RE.match(channel)}
+        if invalid:
+            raise ValueError(f"Invalid channels: {invalid}")
         return v
 
 

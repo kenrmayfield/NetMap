@@ -7,6 +7,7 @@ import {
 import {
   api,
   type User, type SyslogStatus, type SystemSettings, type NotificationSettings,
+  type NotificationProfile,
   type AlertRule, type AlertRulePayload, type AlertRuleEventType,
   type RolePermissions, type VersionInfo, type SystemDiagnostics,
   type DashboardSummary, type TopologyGraph, type AuditLog, type SnmpProfile,
@@ -15,11 +16,232 @@ import { builtInIconPack, allRuntimePacks, type IconPack } from "../../icons";
 import { userInitials, formatEventTime } from "../../utils/format";
 import { triggerDownload } from "../../utils/download";
 import { IconManagerModal } from "../../components/IconManagerModal";
+import { Modal } from "../../components/Modal";
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+const legacyChannelLabels: Record<string, string> = {
+  smtp: "Email (SMTP)",
+  ntfy: "ntfy",
+  telegram: "Telegram",
+  signal: "Signal",
+};
+
+const notificationMethodLabels: Record<string, string> = {
+  ntfy: "ntfy",
+  telegram: "Telegram",
+  signal: "Signal",
+  smtp: "Email (SMTP)",
+  discord: "Discord",
+  slack: "Slack",
+  gotify: "Gotify",
+  pushover: "Pushover",
+  google_chat: "Google Chat",
+  custom: "Custom Apprise URL",
+};
+
+const notificationMethodCatalog = [
+  { id: "ntfy", label: "ntfy", description: "ntfy topic push notifications" },
+  { id: "telegram", label: "Telegram", description: "Telegram bot messages" },
+  { id: "signal", label: "Signal", description: "Signal REST API messages" },
+  { id: "smtp", label: "Email (SMTP)", description: "Email through an SMTP server" },
+  { id: "discord", label: "Discord", description: "Discord webhook alerts" },
+  { id: "slack", label: "Slack", description: "Slack incoming webhook alerts" },
+  { id: "gotify", label: "Gotify", description: "Self-hosted Gotify app notifications" },
+  { id: "pushover", label: "Pushover", description: "Pushover user/app notifications" },
+  { id: "google_chat", label: "Google Chat", description: "Google Chat incoming webhook alerts" },
+  { id: "custom", label: "Custom Apprise URL", description: "Any Apprise-supported notification service" },
+] as const;
+
+const appriseSupportedMethods = [
+  "Discord", "Slack", "Gotify", "Pushover", "Google Chat", "Matrix", "Mattermost",
+  "Rocket.Chat", "Webex Teams", "ntfy", "Email", "Mailgun", "Opsgenie", "PagerDuty",
+  "Telegram", "Signal", "SMS gateways", "Custom JSON/webhook",
+];
+
+type NotificationMethodId = typeof notificationMethodCatalog[number]["id"];
+
+type NotificationProfileForm = {
+  name: string;
+  method: NotificationMethodId;
+  title: string;
+  enabled: boolean;
+  ntfy_url: string;
+  ntfy_token: string;
+  telegram_bot_token: string;
+  telegram_chat_id: string;
+  signal_url: string;
+  signal_number: string;
+  signal_recipient: string;
+  smtp_host: string;
+  smtp_port: string;
+  smtp_user: string;
+  smtp_password: string;
+  smtp_from: string;
+  smtp_to: string;
+  smtp_tls: boolean;
+  discord_webhook_id: string;
+  discord_webhook_token: string;
+  slack_token_a: string;
+  slack_token_b: string;
+  slack_token_c: string;
+  slack_channel: string;
+  gotify_base_url: string;
+  gotify_token: string;
+  pushover_user_key: string;
+  pushover_app_token: string;
+  google_chat_workspace: string;
+  google_chat_key: string;
+  google_chat_token: string;
+  custom_url: string;
+};
+
+const emptyProfileForm: NotificationProfileForm = {
+  name: "",
+  method: "ntfy",
+  title: "NetMap",
+  enabled: true,
+  ntfy_url: "",
+  ntfy_token: "",
+  telegram_bot_token: "",
+  telegram_chat_id: "",
+  signal_url: "",
+  signal_number: "",
+  signal_recipient: "",
+  smtp_host: "",
+  smtp_port: "587",
+  smtp_user: "",
+  smtp_password: "",
+  smtp_from: "",
+  smtp_to: "",
+  smtp_tls: true,
+  discord_webhook_id: "",
+  discord_webhook_token: "",
+  slack_token_a: "",
+  slack_token_b: "",
+  slack_token_c: "",
+  slack_channel: "",
+  gotify_base_url: "",
+  gotify_token: "",
+  pushover_user_key: "",
+  pushover_app_token: "",
+  google_chat_workspace: "",
+  google_chat_key: "",
+  google_chat_token: "",
+  custom_url: "",
+};
+
+function encSegment(value: string): string {
+  return encodeURIComponent(value.trim());
+}
+
+function stripUrlScheme(value: string): string {
+  return value.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
+function buildAppriseUrl(form: NotificationProfileForm): string {
+  switch (form.method) {
+    case "discord":
+      return `discord://${encSegment(form.discord_webhook_id)}/${encSegment(form.discord_webhook_token)}`;
+    case "slack": {
+      const channel = form.slack_channel.trim() ? `/${encSegment(form.slack_channel)}` : "";
+      return `slack://${encSegment(form.slack_token_a)}/${encSegment(form.slack_token_b)}/${encSegment(form.slack_token_c)}${channel}`;
+    }
+    case "gotify":
+      return `gotifys://${stripUrlScheme(form.gotify_base_url)}/${encSegment(form.gotify_token)}`;
+    case "pushover":
+      return `pover://${encSegment(form.pushover_user_key)}@${encSegment(form.pushover_app_token)}`;
+    case "google_chat":
+      return `gchat://${encSegment(form.google_chat_workspace)}/${encSegment(form.google_chat_key)}/${encSegment(form.google_chat_token)}`;
+    case "custom":
+      return form.custom_url.trim();
+    default:
+      return "";
+  }
+}
+
+function providerForMethod(method: NotificationMethodId): "apprise" | "ntfy" | "telegram" | "signal" | "smtp" {
+  if (method === "ntfy" || method === "telegram" || method === "signal" || method === "smtp") {
+    return method;
+  }
+  return "apprise";
+}
+
+function buildNotificationConfig(form: NotificationProfileForm): Record<string, string> {
+  if (form.method === "ntfy") {
+    return { ntfy_url: form.ntfy_url.trim(), ntfy_token: form.ntfy_token, method: form.method, method_label: "ntfy" };
+  }
+  if (form.method === "telegram") {
+    return { telegram_bot_token: form.telegram_bot_token, telegram_chat_id: form.telegram_chat_id.trim(), method: form.method, method_label: "Telegram" };
+  }
+  if (form.method === "signal") {
+    return { signal_url: form.signal_url.trim(), signal_number: form.signal_number.trim(), signal_recipient: form.signal_recipient.trim(), method: form.method, method_label: "Signal" };
+  }
+  if (form.method === "smtp") {
+    return {
+      smtp_host: form.smtp_host.trim(),
+      smtp_port: form.smtp_port.trim() || "587",
+      smtp_user: form.smtp_user.trim(),
+      smtp_password: form.smtp_password,
+      smtp_from: form.smtp_from.trim(),
+      smtp_to: form.smtp_to.trim(),
+      smtp_tls: form.smtp_tls ? "true" : "false",
+      method: form.method,
+      method_label: "Email (SMTP)",
+    };
+  }
+  const method = notificationMethodCatalog.find((item) => item.id === form.method);
+  return {
+    url: buildAppriseUrl(form),
+    title: form.title.trim() || "NetMap",
+    method: form.method,
+    method_label: method?.label ?? notificationMethodLabels[form.method] ?? "Apprise",
+  };
+}
+
+function profileFormIsComplete(form: NotificationProfileForm): boolean {
+  if (!form.name.trim()) return false;
+  if (form.method === "ntfy") return !!form.ntfy_url.trim();
+  if (form.method === "telegram") return !!form.telegram_bot_token.trim() && !!form.telegram_chat_id.trim();
+  if (form.method === "signal") return !!form.signal_url.trim() && !!form.signal_number.trim() && !!form.signal_recipient.trim();
+  if (form.method === "smtp") return !!form.smtp_host.trim() && !!form.smtp_to.trim();
+  if (form.method === "discord") return !!form.discord_webhook_id.trim() && !!form.discord_webhook_token.trim();
+  if (form.method === "slack") return !!form.slack_token_a.trim() && !!form.slack_token_b.trim() && !!form.slack_token_c.trim();
+  if (form.method === "gotify") return !!form.gotify_base_url.trim() && !!form.gotify_token.trim();
+  if (form.method === "pushover") return !!form.pushover_user_key.trim() && !!form.pushover_app_token.trim();
+  if (form.method === "google_chat") return !!form.google_chat_workspace.trim() && !!form.google_chat_key.trim() && !!form.google_chat_token.trim();
+  return !!form.custom_url.trim();
+}
+
+function populateFormFromProfile(profile: NotificationProfile): NotificationProfileForm {
+  const cfg = profile.config;
+  const method = (cfg.method as NotificationMethodId) ?? "ntfy";
+  const base: NotificationProfileForm = { ...emptyProfileForm, name: profile.name, method, enabled: profile.enabled };
+  switch (method) {
+    case "ntfy":
+      return { ...base, ntfy_url: cfg.ntfy_url ?? "", ntfy_token: cfg.ntfy_token ?? "" };
+    case "telegram":
+      return { ...base, telegram_bot_token: cfg.telegram_bot_token ?? "", telegram_chat_id: cfg.telegram_chat_id ?? "" };
+    case "signal":
+      return { ...base, signal_url: cfg.signal_url ?? "", signal_number: cfg.signal_number ?? "", signal_recipient: cfg.signal_recipient ?? "" };
+    case "smtp":
+      return {
+        ...base,
+        smtp_host: cfg.smtp_host ?? "",
+        smtp_port: cfg.smtp_port ?? "587",
+        smtp_user: cfg.smtp_user ?? "",
+        smtp_password: cfg.smtp_password ?? "",
+        smtp_from: cfg.smtp_from ?? "",
+        smtp_to: cfg.smtp_to ?? "",
+        smtp_tls: cfg.smtp_tls !== "false",
+      };
+    default:
+      return { ...base, title: cfg.title ?? "NetMap" };
+  }
 }
 
 export function AdminWorkspace({
@@ -82,6 +304,12 @@ export function AdminWorkspace({
   });
   const [notifBusy, setNotifBusy] = useState(false);
   const [notifTestResult, setNotifTestResult] = useState<Record<string, string>>({});
+  const [notificationProfiles, setNotificationProfiles] = useState<NotificationProfile[]>([]);
+  const [profileForm, setProfileForm] = useState<NotificationProfileForm>(emptyProfileForm);
+  const [profileTestResult, setProfileTestResult] = useState<Record<number, string>>({});
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
   const [alertRulesBusy, setAlertRulesBusy] = useState(false);
   const [alertRulesError, setAlertRulesError] = useState<string | null>(null);
@@ -148,8 +376,13 @@ export function AdminWorkspace({
   useEffect(() => {
     if (activeTab !== "notifications") return;
     void api.getNotificationSettings(accessToken).then(setNotifSettings).catch(() => {});
+    void loadNotificationProfiles();
   }, [activeTab, accessToken]);
-  useEffect(() => { if (activeTab === "alerts") void loadAlertRules(); }, [activeTab]);
+  useEffect(() => {
+    if (activeTab !== "alerts") return;
+    void loadAlertRules();
+    void loadNotificationProfiles();
+  }, [activeTab]);
   useEffect(() => {
     if (activeTab !== "groups") return;
     void api.getRolePermissions(accessToken).then((data) => {
@@ -277,6 +510,92 @@ export function AdminWorkspace({
     }
   }
 
+  async function loadNotificationProfiles() {
+    try {
+      setNotificationProfiles(await api.listNotificationProfiles(accessToken));
+    } catch {
+      // Legacy notification settings still work if profile loading fails.
+    }
+  }
+
+  async function saveNotificationProfile(event: FormEvent) {
+    event.preventDefault();
+    setProfileBusy(true);
+    setError(null); setSuccess(null);
+    try {
+      if (editingProfileId !== null) {
+        const isApprise = providerForMethod(profileForm.method) === "apprise";
+        const hasCredentials = !isApprise || profileFormIsComplete(profileForm);
+        const updated = await api.updateNotificationProfile(accessToken, editingProfileId, {
+          name: profileForm.name.trim(),
+          enabled: profileForm.enabled,
+          ...(hasCredentials && {
+            provider: providerForMethod(profileForm.method),
+            config: buildNotificationConfig(profileForm),
+          }),
+        });
+        setNotificationProfiles((current) => current.map((p) => p.id === updated.id ? updated : p));
+        setProfileForm(emptyProfileForm);
+        setEditingProfileId(null);
+        setShowProfileModal(false);
+        setSuccess(`Notification method "${updated.name}" updated.`);
+      } else {
+        const profile = await api.createNotificationProfile(accessToken, {
+          name: profileForm.name.trim(),
+          provider: providerForMethod(profileForm.method),
+          enabled: profileForm.enabled,
+          config: buildNotificationConfig(profileForm),
+        });
+        setNotificationProfiles((current) => [...current, profile].sort((a, b) => a.name.localeCompare(b.name)));
+        setProfileForm(emptyProfileForm);
+        setShowProfileModal(false);
+        setSuccess(`Notification method "${profile.name}" created.`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : editingProfileId !== null ? "Unable to update notification method" : "Unable to create notification method");
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function toggleNotificationProfile(profile: NotificationProfile) {
+    setProfileBusy(true);
+    setError(null); setSuccess(null);
+    try {
+      const updated = await api.updateNotificationProfile(accessToken, profile.id, { enabled: !profile.enabled });
+      setNotificationProfiles((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update notification profile");
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function deleteNotificationProfile(profile: NotificationProfile) {
+    setProfileBusy(true);
+    setError(null); setSuccess(null);
+    try {
+      await api.deleteNotificationProfile(accessToken, profile.id);
+      setNotificationProfiles((current) => current.filter((item) => item.id !== profile.id));
+      setAlertForm((current) => ({ ...current, channels: current.channels.filter((channel) => channel !== `profile:${profile.id}`) }));
+      setSuccess(`Notification profile "${profile.name}" deleted.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete notification profile");
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function testNotificationProfile(profile: NotificationProfile) {
+    setProfileTestResult((current) => ({ ...current, [profile.id]: "Sending…" }));
+    try {
+      const result = await api.testNotificationProfile(accessToken, profile.id);
+      setProfileTestResult((current) => ({ ...current, [profile.id]: result.status === "ok" ? "Sent successfully" : result.status }));
+    } catch (err) {
+      setProfileTestResult((current) => ({ ...current, [profile.id]: err instanceof Error ? err.message : "Failed" }));
+    }
+  }
+
   async function loadAlertRules() {
     try {
       const rules = await api.listAlertRules(accessToken);
@@ -334,6 +653,20 @@ export function AdminWorkspace({
     } finally {
       setAlertTestBusy(null);
     }
+  }
+
+  function notificationTargetLabel(target: string): string {
+    if (target.startsWith("profile:")) {
+      const id = Number(target.slice("profile:".length));
+      const profile = notificationProfiles.find((item) => item.id === id);
+      return profile ? profile.name : `Profile #${id}`;
+    }
+    return legacyChannelLabels[target] ?? target;
+  }
+
+  function notificationProfileMethodLabel(profile: NotificationProfile): string {
+    const method = profile.config.method || "";
+    return profile.config.method_label || notificationMethodLabels[method] || "Custom Apprise URL";
   }
 
   async function updateUser(userId: number, payload: { role?: string; is_active?: boolean; email?: string | null; avatar_data?: string | null }) {
@@ -1031,101 +1364,275 @@ export function AdminWorkspace({
 
       {activeTab === "notifications" && (
         <div className="admin-tab-content">
-          <div className="admin-grid">
-
-            <section className="panel admin-panel">
-              <h2 className="admin-section-title notif-provider-heading"><IconCloud size={16} />ntfy</h2>
-              <p className="tool-note">Push notifications via ntfy.sh or a self-hosted ntfy server.</p>
-              <div className="tool-form">
-                <label>Topic URL
-                  <input placeholder="https://ntfy.sh/my-topic" value={notifSettings.ntfy_url} onChange={(e) => setNotifSettings((c) => ({ ...c, ntfy_url: e.target.value }))} />
-                </label>
-                <label>Access token <span className="tool-note">(optional)</span>
-                  <input type="password" placeholder="tk_…" value={notifSettings.ntfy_token} onChange={(e) => setNotifSettings((c) => ({ ...c, ntfy_token: e.target.value }))} />
-                </label>
-                <div className="notif-actions">
-                  <button type="button" className="ipam-btn ipam-btn--primary" disabled={notifBusy} onClick={() => void saveNotifSettings()}>{notifBusy ? "Saving…" : "Save"}</button>
-                  <button type="button" className="ipam-btn" onClick={() => void testNotif("ntfy")}>Send test</button>
-                  {notifTestResult.ntfy && <span className={`notif-result${notifTestResult.ntfy === "Sent successfully" ? " ok" : " err"}`}>{notifTestResult.ntfy}</span>}
-                </div>
+          <section className="panel admin-panel" style={{ marginBottom: 16 }}>
+            <div className="admin-panel-header">
+              <h2 className="admin-section-title notif-provider-heading"><IconCloud size={16} />Notification methods</h2>
+              <div className="admin-panel-actions">
+                <button
+                  type="button"
+                  className="ipam-btn ipam-btn--primary"
+                  onClick={() => { setEditingProfileId(null); setProfileForm(emptyProfileForm); setShowProfileModal(true); }}
+                >
+                  + Add method
+                </button>
+                <button type="button" className="ipam-btn" disabled={profileBusy} onClick={() => void loadNotificationProfiles()}>
+                  Refresh
+                </button>
               </div>
-            </section>
-
-            <section className="panel admin-panel">
-              <h2 className="admin-section-title notif-provider-heading"><IconCloud size={16} />Telegram</h2>
-              <p className="tool-note">Send messages via a Telegram bot to a chat or channel.</p>
-              <div className="tool-form">
-                <label>Bot token
-                  <input type="password" placeholder="123456:ABC-DEF…" value={notifSettings.telegram_bot_token} onChange={(e) => setNotifSettings((c) => ({ ...c, telegram_bot_token: e.target.value }))} />
-                </label>
-                <label>Chat ID
-                  <input placeholder="-100123456789" value={notifSettings.telegram_chat_id} onChange={(e) => setNotifSettings((c) => ({ ...c, telegram_chat_id: e.target.value }))} />
-                </label>
-                <div className="notif-actions">
-                  <button type="button" className="ipam-btn ipam-btn--primary" disabled={notifBusy} onClick={() => void saveNotifSettings()}>{notifBusy ? "Saving…" : "Save"}</button>
-                  <button type="button" className="ipam-btn" onClick={() => void testNotif("telegram")}>Send test</button>
-                  {notifTestResult.telegram && <span className={`notif-result${notifTestResult.telegram === "Sent successfully" ? " ok" : " err"}`}>{notifTestResult.telegram}</span>}
+            </div>
+            <p className="tool-note">Create reusable notification methods. Common services have guided fields; Custom Apprise URL covers the wider Apprise catalog.</p>
+            <details className="notif-apprise-details">
+              <summary>Services available via Custom Apprise URL</summary>
+              <p className="tool-note" style={{ margin: '6px 0 0' }}>{appriseSupportedMethods.join(", ")} and more.</p>
+            </details>
+            <div className="notif-methods-table">
+              {notificationProfiles.length === 0 ? (
+                <p className="audit-empty">No notification methods configured yet. Click <strong>+ Add method</strong> to get started.</p>
+              ) : notificationProfiles.map((profile) => (
+                <div className="notif-method-row" key={profile.id}>
+                  <div className="notif-method-info">
+                    <span className="notif-method-name">{profile.name}</span>
+                    <div className="notif-method-meta">
+                      <span className="notif-method-tag">{notificationProfileMethodLabel(profile)}</span>
+                      <span className={`notif-status-badge notif-status-badge--${profile.enabled ? "active" : "off"}`}>
+                        {profile.enabled ? "Active" : "Disabled"}
+                      </span>
+                    </div>
+                    {profileTestResult[profile.id] && (
+                      <span className={`notif-result${profileTestResult[profile.id] === "Sent successfully" ? " ok" : " err"}`} style={{ display: "block", marginTop: 5 }}>
+                        {profileTestResult[profile.id]}
+                      </span>
+                    )}
+                  </div>
+                  <div className="notif-method-actions">
+                    <button type="button" className="admin-action-btn" disabled={profileBusy} onClick={() => void testNotificationProfile(profile)}>
+                      Test
+                    </button>
+                    <button type="button" className="admin-action-btn" disabled={profileBusy} onClick={() => { setEditingProfileId(profile.id); setProfileForm(populateFormFromProfile(profile)); setShowProfileModal(true); }}>
+                      Edit
+                    </button>
+                    <button type="button" className="admin-action-btn" disabled={profileBusy} onClick={() => void toggleNotificationProfile(profile)}>
+                      {profile.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button type="button" className="admin-action-btn admin-action-btn--danger" disabled={profileBusy} onClick={() => void deleteNotificationProfile(profile)}>
+                      Delete
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </section>
-
-            <section className="panel admin-panel">
-              <h2 className="admin-section-title notif-provider-heading"><IconCloud size={16} />Signal</h2>
-              <p className="tool-note">Requires a running <a href="https://github.com/bbernhard/signal-cli-rest-api" target="_blank" rel="noreferrer">signal-cli REST API</a> instance.</p>
-              <div className="tool-form">
-                <label>REST API URL
-                  <input placeholder="http://localhost:8080" value={notifSettings.signal_url} onChange={(e) => setNotifSettings((c) => ({ ...c, signal_url: e.target.value }))} />
-                </label>
-                <label>Sender number <span className="tool-note">(E.164)</span>
-                  <input placeholder="+447700000000" value={notifSettings.signal_number} onChange={(e) => setNotifSettings((c) => ({ ...c, signal_number: e.target.value }))} />
-                </label>
-                <label>Recipient number <span className="tool-note">(E.164)</span>
-                  <input placeholder="+447700000001" value={notifSettings.signal_recipient} onChange={(e) => setNotifSettings((c) => ({ ...c, signal_recipient: e.target.value }))} />
-                </label>
-                <div className="notif-actions">
-                  <button type="button" className="ipam-btn ipam-btn--primary" disabled={notifBusy} onClick={() => void saveNotifSettings()}>{notifBusy ? "Saving…" : "Save"}</button>
-                  <button type="button" className="ipam-btn" onClick={() => void testNotif("signal")}>Send test</button>
-                  {notifTestResult.signal && <span className={`notif-result${notifTestResult.signal === "Sent successfully" ? " ok" : " err"}`}>{notifTestResult.signal}</span>}
-                </div>
-              </div>
-            </section>
-
-            <section className="panel admin-panel">
-              <h2 className="admin-section-title notif-provider-heading"><IconCloud size={16} />SMTP / Email</h2>
-              <p className="tool-note">Send email alerts via any SMTP server (Gmail, SendGrid, local relay, etc.).</p>
-              <div className="tool-form">
-                <label>SMTP host
-                  <input placeholder="smtp.gmail.com" value={notifSettings.smtp_host} onChange={(e) => setNotifSettings((c) => ({ ...c, smtp_host: e.target.value }))} />
-                </label>
-                <label>Port
-                  <input placeholder="587" value={notifSettings.smtp_port} onChange={(e) => setNotifSettings((c) => ({ ...c, smtp_port: e.target.value }))} />
-                </label>
-                <label>Username
-                  <input placeholder="you@example.com" value={notifSettings.smtp_user} onChange={(e) => setNotifSettings((c) => ({ ...c, smtp_user: e.target.value }))} />
-                </label>
-                <label>Password
-                  <input type="password" value={notifSettings.smtp_password} onChange={(e) => setNotifSettings((c) => ({ ...c, smtp_password: e.target.value }))} />
-                </label>
-                <label>From address <span className="tool-note">(defaults to username)</span>
-                  <input placeholder="netmap@example.com" value={notifSettings.smtp_from} onChange={(e) => setNotifSettings((c) => ({ ...c, smtp_from: e.target.value }))} />
-                </label>
-                <label>Send alerts to
-                  <input placeholder="admin@example.com" value={notifSettings.smtp_to} onChange={(e) => setNotifSettings((c) => ({ ...c, smtp_to: e.target.value }))} />
-                </label>
-                <label className="inline-toggle">
-                  <input type="checkbox" checked={notifSettings.smtp_tls === "true"} onChange={(e) => setNotifSettings((c) => ({ ...c, smtp_tls: e.target.checked ? "true" : "false" }))} />
-                  Use STARTTLS
-                </label>
-                <div className="notif-actions">
-                  <button type="button" className="ipam-btn ipam-btn--primary" disabled={notifBusy} onClick={() => void saveNotifSettings()}>{notifBusy ? "Saving…" : "Save"}</button>
-                  <button type="button" className="ipam-btn" onClick={() => void testNotif("smtp")}>Send test</button>
-                  {notifTestResult.smtp && <span className={`notif-result${notifTestResult.smtp === "Sent successfully" ? " ok" : " err"}`}>{notifTestResult.smtp}</span>}
-                </div>
-              </div>
-            </section>
-
-          </div>
+              ))}
+            </div>
+          </section>
         </div>
+      )}
+
+      {showProfileModal && (
+        <Modal
+          title={editingProfileId !== null ? `Edit — ${profileForm.name || "notification method"}` : "Add notification method"}
+          onCancel={() => { setShowProfileModal(false); setEditingProfileId(null); setProfileForm(emptyProfileForm); }}
+          headerSubmitLabel={profileBusy ? "Saving…" : editingProfileId !== null ? "Update" : "Save"}
+          headerSubmitFormId="notif-profile-form"
+          headerSubmitDisabled={profileBusy || (editingProfileId === null ? !profileFormIsComplete(profileForm) : !profileForm.name.trim())}
+        >
+          <form id="notif-profile-form" className="modal-form" onSubmit={saveNotificationProfile}>
+            <div className="notif-modal-type-section">
+              <label>
+                Notification type
+                <select
+                  value={profileForm.method}
+                  onChange={(e) => setProfileForm((c) => ({ ...c, method: e.target.value as NotificationMethodId }))}
+                >
+                  {notificationMethodCatalog.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="notif-modal-type-desc">
+                {notificationMethodCatalog.find((m) => m.id === profileForm.method)?.description}
+              </p>
+            </div>
+            <label>
+              Name
+              <input required maxLength={120} placeholder="e.g. Home Alerts" value={profileForm.name} onChange={(e) => setProfileForm((c) => ({ ...c, name: e.target.value }))} />
+            </label>
+            {providerForMethod(profileForm.method) === "apprise" && (
+              <label>
+                Title <span className="tool-note">(optional — shown in notification)</span>
+                <input maxLength={80} placeholder="NetMap" value={profileForm.title} onChange={(e) => setProfileForm((c) => ({ ...c, title: e.target.value }))} />
+              </label>
+            )}
+            {profileForm.method === "ntfy" && (
+              <div className="modal-form-row">
+                <label>
+                  Topic URL
+                  <input required placeholder="https://ntfy.sh/my-topic" value={profileForm.ntfy_url} onChange={(e) => setProfileForm((c) => ({ ...c, ntfy_url: e.target.value }))} />
+                </label>
+                <label>
+                  Access token <span className="tool-note">(optional)</span>
+                  <input type="password" placeholder="tk_..." value={profileForm.ntfy_token} onChange={(e) => setProfileForm((c) => ({ ...c, ntfy_token: e.target.value }))} />
+                </label>
+              </div>
+            )}
+            {profileForm.method === "telegram" && (
+              <div className="modal-form-row">
+                <label>
+                  Bot token
+                  <input required type="password" placeholder="123456:ABC-DEF..." value={profileForm.telegram_bot_token} onChange={(e) => setProfileForm((c) => ({ ...c, telegram_bot_token: e.target.value }))} />
+                </label>
+                <label>
+                  Chat ID
+                  <input required placeholder="-100123456789" value={profileForm.telegram_chat_id} onChange={(e) => setProfileForm((c) => ({ ...c, telegram_chat_id: e.target.value }))} />
+                </label>
+              </div>
+            )}
+            {profileForm.method === "signal" && (
+              <>
+                <label>
+                  REST API URL
+                  <input required placeholder="http://localhost:8080" value={profileForm.signal_url} onChange={(e) => setProfileForm((c) => ({ ...c, signal_url: e.target.value }))} />
+                </label>
+                <div className="modal-form-row">
+                  <label>
+                    Sender number
+                    <input required placeholder="+447700000000" value={profileForm.signal_number} onChange={(e) => setProfileForm((c) => ({ ...c, signal_number: e.target.value }))} />
+                  </label>
+                  <label>
+                    Recipient number
+                    <input required placeholder="+447700000001" value={profileForm.signal_recipient} onChange={(e) => setProfileForm((c) => ({ ...c, signal_recipient: e.target.value }))} />
+                  </label>
+                </div>
+              </>
+            )}
+            {profileForm.method === "smtp" && (
+              <>
+                <div className="modal-form-row">
+                  <label>
+                    SMTP host
+                    <input required placeholder="smtp.gmail.com" value={profileForm.smtp_host} onChange={(e) => setProfileForm((c) => ({ ...c, smtp_host: e.target.value }))} />
+                  </label>
+                  <label>
+                    Port
+                    <input placeholder="587" value={profileForm.smtp_port} onChange={(e) => setProfileForm((c) => ({ ...c, smtp_port: e.target.value }))} />
+                  </label>
+                </div>
+                <div className="modal-form-row">
+                  <label>
+                    Username
+                    <input placeholder="you@example.com" value={profileForm.smtp_user} onChange={(e) => setProfileForm((c) => ({ ...c, smtp_user: e.target.value }))} />
+                  </label>
+                  <label>
+                    Password
+                    <input type="password" value={profileForm.smtp_password} onChange={(e) => setProfileForm((c) => ({ ...c, smtp_password: e.target.value }))} />
+                  </label>
+                </div>
+                <div className="modal-form-row">
+                  <label>
+                    From address
+                    <input placeholder="netmap@example.com" value={profileForm.smtp_from} onChange={(e) => setProfileForm((c) => ({ ...c, smtp_from: e.target.value }))} />
+                  </label>
+                  <label>
+                    Send alerts to
+                    <input required placeholder="admin@example.com" value={profileForm.smtp_to} onChange={(e) => setProfileForm((c) => ({ ...c, smtp_to: e.target.value }))} />
+                  </label>
+                </div>
+                <label className="checkbox-label">
+                  <input type="checkbox" checked={profileForm.smtp_tls} onChange={(e) => setProfileForm((c) => ({ ...c, smtp_tls: e.target.checked }))} />
+                  <span>Use STARTTLS</span>
+                </label>
+              </>
+            )}
+            {profileForm.method === "discord" && (
+              <div className="modal-form-row">
+                <label>
+                  Webhook ID
+                  <input required type="password" value={profileForm.discord_webhook_id} onChange={(e) => setProfileForm((c) => ({ ...c, discord_webhook_id: e.target.value }))} />
+                </label>
+                <label>
+                  Webhook token
+                  <input required type="password" value={profileForm.discord_webhook_token} onChange={(e) => setProfileForm((c) => ({ ...c, discord_webhook_token: e.target.value }))} />
+                </label>
+              </div>
+            )}
+            {profileForm.method === "slack" && (
+              <>
+                <div className="modal-form-row">
+                  <label>
+                    Token A
+                    <input required type="password" placeholder="T00000000" value={profileForm.slack_token_a} onChange={(e) => setProfileForm((c) => ({ ...c, slack_token_a: e.target.value }))} />
+                  </label>
+                  <label>
+                    Token B
+                    <input required type="password" placeholder="B00000000" value={profileForm.slack_token_b} onChange={(e) => setProfileForm((c) => ({ ...c, slack_token_b: e.target.value }))} />
+                  </label>
+                </div>
+                <div className="modal-form-row">
+                  <label>
+                    Token C
+                    <input required type="password" placeholder="XXXXXXXXXXXXXXXX" value={profileForm.slack_token_c} onChange={(e) => setProfileForm((c) => ({ ...c, slack_token_c: e.target.value }))} />
+                  </label>
+                  <label>
+                    Channel <span className="tool-note">(optional)</span>
+                    <input placeholder="#alerts" value={profileForm.slack_channel} onChange={(e) => setProfileForm((c) => ({ ...c, slack_channel: e.target.value }))} />
+                  </label>
+                </div>
+              </>
+            )}
+            {profileForm.method === "gotify" && (
+              <div className="modal-form-row">
+                <label>
+                  Server URL
+                  <input required placeholder="https://gotify.example.com" value={profileForm.gotify_base_url} onChange={(e) => setProfileForm((c) => ({ ...c, gotify_base_url: e.target.value }))} />
+                </label>
+                <label>
+                  App token
+                  <input required type="password" value={profileForm.gotify_token} onChange={(e) => setProfileForm((c) => ({ ...c, gotify_token: e.target.value }))} />
+                </label>
+              </div>
+            )}
+            {profileForm.method === "pushover" && (
+              <div className="modal-form-row">
+                <label>
+                  User key
+                  <input required type="password" value={profileForm.pushover_user_key} onChange={(e) => setProfileForm((c) => ({ ...c, pushover_user_key: e.target.value }))} />
+                </label>
+                <label>
+                  Application token
+                  <input required type="password" value={profileForm.pushover_app_token} onChange={(e) => setProfileForm((c) => ({ ...c, pushover_app_token: e.target.value }))} />
+                </label>
+              </div>
+            )}
+            {profileForm.method === "google_chat" && (
+              <>
+                <div className="modal-form-row">
+                  <label>
+                    Workspace
+                    <input required type="password" value={profileForm.google_chat_workspace} onChange={(e) => setProfileForm((c) => ({ ...c, google_chat_workspace: e.target.value }))} />
+                  </label>
+                  <label>
+                    Webhook key
+                    <input required type="password" value={profileForm.google_chat_key} onChange={(e) => setProfileForm((c) => ({ ...c, google_chat_key: e.target.value }))} />
+                  </label>
+                </div>
+                <label>
+                  Webhook token
+                  <input required type="password" value={profileForm.google_chat_token} onChange={(e) => setProfileForm((c) => ({ ...c, google_chat_token: e.target.value }))} />
+                </label>
+              </>
+            )}
+            {profileForm.method === "custom" && (
+              <label>
+                Apprise URL
+                <input required type="password" placeholder="jsons://example.com/webhook" value={profileForm.custom_url} onChange={(e) => setProfileForm((c) => ({ ...c, custom_url: e.target.value }))} />
+              </label>
+            )}
+            {editingProfileId !== null && providerForMethod(profileForm.method) === "apprise" && (
+              <p className="tool-note">Leave credential fields blank to keep existing values.</p>
+            )}
+            <label className="checkbox-label">
+              <input type="checkbox" checked={profileForm.enabled} onChange={(e) => setProfileForm((c) => ({ ...c, enabled: e.target.checked }))} />
+              <span>Enabled</span>
+            </label>
+          </form>
+        </Modal>
       )}
 
       {activeTab === "alerts" && (
@@ -1166,17 +1673,33 @@ export function AdminWorkspace({
                   </select>
                 </label>
                 <fieldset style={{ border: '1px solid #d0dde6', borderRadius: 6, padding: '8px 12px' }}>
-                  <legend style={{ fontSize: 12, fontWeight: 700, color: '#314656', padding: '0 4px' }}>Notify via</legend>
-                  {(["smtp", "ntfy", "telegram", "signal"] as const).map(ch => (
+                  <legend style={{ fontSize: 12, fontWeight: 700, color: '#314656', padding: '0 4px' }}>Notify via saved methods</legend>
+                  {alertForm.channels.filter((channel) => !channel.startsWith("profile:")).map(ch => (
                     <label key={ch} className="tool-form-inline-check" style={{ marginBottom: 4 }}>
-                      <input type="checkbox" checked={alertForm.channels.includes(ch)}
+                      <input type="checkbox" checked
                         onChange={(e) => setAlertForm(f => ({
                           ...f,
-                          channels: e.target.checked ? [...f.channels, ch] : f.channels.filter(c => c !== ch)
+                          channels: e.target.checked ? f.channels : f.channels.filter(c => c !== ch)
                         }))} />
-                      {ch === "smtp" ? "Email (SMTP)" : ch === "ntfy" ? "ntfy" : ch === "telegram" ? "Telegram" : "Signal"}
+                      {legacyChannelLabels[ch] ?? ch} <span className="tool-note">(legacy)</span>
                     </label>
                   ))}
+                  {notificationProfiles.map(profile => {
+                    const target = `profile:${profile.id}`;
+                    return (
+                      <label key={target} className="tool-form-inline-check" style={{ marginBottom: 4 }}>
+                        <input type="checkbox" checked={alertForm.channels.includes(target)}
+                          onChange={(e) => setAlertForm(f => ({
+                            ...f,
+                            channels: e.target.checked ? [...f.channels, target] : f.channels.filter(c => c !== target)
+                          }))} />
+                        {profile.name} <span className="tool-note">({notificationProfileMethodLabel(profile)}{profile.enabled ? "" : ", disabled"})</span>
+                      </label>
+                    );
+                  })}
+                  {notificationProfiles.length === 0 && (
+                    <p className="tool-note" style={{ margin: '6px 0 0' }}>Add notification methods in Notifications to target alert rules.</p>
+                  )}
                 </fieldset>
                 <label>Cooldown
                   <select value={alertForm.cooldown_minutes} onChange={(e) => setAlertForm(f => ({...f, cooldown_minutes: Number(e.target.value)}))}>
@@ -1233,7 +1756,7 @@ export function AdminWorkspace({
                         <td style={{ padding: '10px 10px', fontWeight: 600 }}>{rule.name}</td>
                         <td style={{ padding: '10px 10px', color: '#4a6474' }}>{triggerLabels[rule.event_type] ?? rule.event_type}</td>
                         <td style={{ padding: '10px 10px', color: '#4a6474', fontSize: 12 }}>{deviceName}</td>
-                        <td style={{ padding: '10px 10px', fontSize: 12 }}>{rule.channels.join(", ") || "—"}</td>
+                        <td style={{ padding: '10px 10px', fontSize: 12 }}>{rule.channels.map(notificationTargetLabel).join(", ") || "—"}</td>
                         <td style={{ padding: '10px 10px', color: '#4a6474', fontSize: 12 }}>{rule.cooldown_minutes >= 60 ? `${rule.cooldown_minutes / 60}h` : `${rule.cooldown_minutes}m`}</td>
                         <td style={{ padding: '10px 10px' }}>
                           <span className={`alert-status-pill${rule.enabled ? " alert-status-pill--active" : ""}`}>
@@ -1259,7 +1782,7 @@ export function AdminWorkspace({
                             <div className="alert-test-results">
                               {Object.entries(testResult).map(([ch, res]) => (
                                 <span key={ch} className={`notif-result${res === "Sent successfully" ? " ok" : " err"}`}>
-                                  {ch}: {res}
+                                  {notificationTargetLabel(ch)}: {res}
                                 </span>
                               ))}
                             </div>

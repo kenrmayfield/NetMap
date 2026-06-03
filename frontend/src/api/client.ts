@@ -467,6 +467,23 @@ export type NotificationSettings = {
   smtp_tls: string;
 };
 
+export type NotificationProfile = {
+  id: number;
+  name: string;
+  provider: "apprise" | "ntfy" | "telegram" | "signal" | "smtp";
+  enabled: boolean;
+  config: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationProfilePayload = {
+  name: string;
+  provider: "apprise" | "ntfy" | "telegram" | "signal" | "smtp";
+  enabled: boolean;
+  config: Record<string, string>;
+};
+
 export type AlertRuleEventType = "device_offline" | "device_online" | "device_warning" | "any_status_change";
 
 export type AlertRule = {
@@ -1235,6 +1252,24 @@ export const api = {
       token,
       body: JSON.stringify({ channel, message }),
     }),
+  listNotificationProfiles: (token: string) =>
+    request<NotificationProfile[]>("/api/v1/admin/notification-profiles", { token }),
+  createNotificationProfile: (token: string, payload: NotificationProfilePayload) =>
+    request<NotificationProfile>("/api/v1/admin/notification-profiles", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload),
+    }),
+  updateNotificationProfile: (token: string, id: number, payload: Partial<NotificationProfilePayload>) =>
+    request<NotificationProfile>(`/api/v1/admin/notification-profiles/${id}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(payload),
+    }),
+  deleteNotificationProfile: (token: string, id: number) =>
+    request<void>(`/api/v1/admin/notification-profiles/${id}`, { method: "DELETE", token }),
+  testNotificationProfile: (token: string, id: number) =>
+    request<{ status: string }>(`/api/v1/admin/notification-profiles/${id}/test`, { method: "POST", token }),
   listAlertRules: (token: string) =>
     request<AlertRule[]>("/api/v1/alerts/rules", { token }),
   createAlertRule: (token: string, payload: AlertRulePayload) =>

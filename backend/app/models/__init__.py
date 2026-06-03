@@ -7,6 +7,7 @@ from app.models.device import Device, DeviceStatus
 from app.models.discovery import DiscoveryScan
 from app.models.firewall_event import FirewallEvent
 from app.models.ip_reservation import IpReservation
+from app.models.notification_profile import NotificationProfile
 from app.models.password_reset_token import PasswordResetToken
 from app.models.relationship import DeviceRelationship
 from app.models.snmp_profile import SnmpProfile
@@ -18,6 +19,7 @@ __all__ = [
     "AlertEvent",
     "AuditLog",
     "IpReservation",
+    "NotificationProfile",
     "LoginThrottleState",
     "PasswordResetToken",
     "RefreshTokenState",

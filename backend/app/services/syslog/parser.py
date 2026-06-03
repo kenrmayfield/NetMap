@@ -32,6 +32,22 @@ KEY_VALUE_RE = re.compile(
     re.IGNORECASE,
 )
 ACTION_TOKEN_RE = re.compile(r"(?:^|\s)(?P<action>DROP|ACCEPT|REJECT|ALLOW|DENY|BLOCK|PASS)(?:\s|:|$)", re.IGNORECASE)
+BANIP_PREFIX_RE = re.compile(
+    r"(?:^|\s)(?P<package>banIP)/(?P<chain>[^/\s:]+)/(?P<action>[^/\s:]+)/(?P<feed>[^/\s:]+):",
+    re.IGNORECASE,
+)
+ACTION_ALIASES = {
+    "acc": "accept",
+    "accept": "accept",
+    "allow": "allow",
+    "block": "block",
+    "deny": "deny",
+    "drp": "drop",
+    "drop": "drop",
+    "pass": "pass",
+    "rej": "reject",
+    "reject": "reject",
+}
 
 MAX_TEXT_LENGTH = 255
 
@@ -198,23 +214,43 @@ def parse_key_value_message(message: str) -> dict[str, Any] | None:
         values[match.group("key").lower()] = value.strip("'\"")
     if not values:
         return None
+    banip = parse_banip_prefix(message)
     action = values.get("action")
+    if action is None:
+        action = banip["action"] if banip else None
     if action is None:
         action_match = ACTION_TOKEN_RE.search(message)
         if action_match:
             action = action_match.group("action")
+    normalized_action = clean_action(action)
     return {
         "src_ip": clean_ip(values.get("src")),
         "dst_ip": clean_ip(values.get("dst")),
         "src_port": clean_port(values.get("spt")),
         "dst_port": clean_port(values.get("dpt")),
         "protocol": clean_protocol(values.get("proto")),
-        "action": clean_text(action.lower() if action else None),
+        "action": normalized_action,
         "interface": clean_text(values.get("in") or values.get("out")),
         "direction": "in" if values.get("in") else "out" if values.get("out") else None,
-        "rule_id": None,
-        "tracker_id": None,
-        "reason": None,
+        "rule_id": clean_text(banip["rule_id"]) if banip else None,
+        "tracker_id": clean_text(banip["tracker_id"]) if banip else None,
+        "reason": clean_text(banip["reason"]) if banip else None,
+    }
+
+
+def parse_banip_prefix(message: str) -> dict[str, str] | None:
+    match = BANIP_PREFIX_RE.search(message)
+    if not match:
+        return None
+    package = match.group("package")
+    chain = match.group("chain")
+    action = clean_action(match.group("action")) or match.group("action").lower()
+    feed = match.group("feed")
+    return {
+        "tracker_id": package,
+        "action": action,
+        "rule_id": feed,
+        "reason": f"{package} {chain}",
     }
 
 
@@ -242,6 +278,13 @@ def clean_text(value: Any) -> str | None:
     if not text or text == "-":
         return None
     return text[:MAX_TEXT_LENGTH]
+
+
+def clean_action(value: Any) -> str | None:
+    text = clean_text(value)
+    if text is None:
+        return None
+    return ACTION_ALIASES.get(text.lower(), text.lower()[:MAX_TEXT_LENGTH])
 
 
 def clean_ip(value: Any) -> str | None:

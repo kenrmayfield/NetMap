@@ -45,7 +45,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.models import alert_rule, auth_session, audit_log, device, dhcp_lease, discovery, ip_reservation, monitor_history, password_reset_token, port_target, relationship, site, snmp_profile, subnet, system_setting, topology_group, topology_layout, user, user_device_favourite  # noqa: F401
+    from app.models import alert_rule, auth_session, audit_log, device, dhcp_lease, discovery, ip_reservation, monitor_history, notification_profile, password_reset_token, port_target, relationship, site, snmp_profile, subnet, system_setting, topology_group, topology_layout, user, user_device_favourite  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_migrations_table()
@@ -121,6 +121,7 @@ def apply_sqlite_schema_updates() -> None:
         _run_migration(conn, inspector, "0029_topology_layout_display_prefs", _migrate_topology_layout_display_prefs)
         _run_migration(conn, inspector, "0030_snmp_profiles", _migrate_snmp_profiles)
         _run_migration(conn, inspector, "0031_service_check_fields", _migrate_service_check_fields)
+        _run_migration(conn, inspector, "0032_notification_profiles", _migrate_notification_profiles)
 
 
 def _run_migration(conn, inspector, name: str, fn) -> None:
@@ -349,6 +350,25 @@ def _migrate_alert_rules(conn, inspector) -> None:
         )
     )
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_alert_rules_id ON alert_rules (id)"))
+
+
+def _migrate_notification_profiles(conn, inspector) -> None:
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS notification_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(120) NOT NULL,
+                provider VARCHAR(40) NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                config_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notification_profiles_id ON notification_profiles (id)"))
 
 
 def _migrate_monitor_history(conn, inspector) -> None:

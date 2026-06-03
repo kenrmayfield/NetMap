@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from email.mime.text import MIMEText
 from email.utils import formataddr
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,8 +35,17 @@ NOTIFICATION_DEFAULTS: dict[str, str] = {
 
 # Fields whose values are encrypted at rest and redacted in API responses.
 _SECRET_FIELDS = frozenset({"ntfy_token", "telegram_bot_token", "smtp_password"})
+_PROFILE_SECRET_KEYS = frozenset({
+    "url",
+    "ntfy_token",
+    "telegram_bot_token",
+    "signal_number",
+    "signal_recipient",
+    "smtp_password",
+})
 _REDACTED = "__redacted__"
 _ENC_PREFIX = "enc:"
+LEGACY_CHANNELS = ("smtp", "ntfy", "telegram", "signal")
 
 _PRIVATE_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8"),
@@ -93,6 +103,52 @@ def _decrypt(value: str) -> str:
     return value
 
 
+def _encrypt_profile_config(config: dict[str, Any]) -> str:
+    return _encrypt(json.dumps(config, separators=(",", ":")))
+
+
+def _decrypt_profile_config(value: str) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        decoded = _decrypt(value)
+        data = json.loads(decoded)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        logger.warning("Failed to decode notification profile config", exc_info=True)
+        return {}
+
+
+def _redact_profile_config(config: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(config)
+    for key in _PROFILE_SECRET_KEYS:
+        if redacted.get(key):
+            redacted[key] = _REDACTED
+    return redacted
+
+
+def _merge_profile_config(existing: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(existing)
+    for key, value in updates.items():
+        if key in _PROFILE_SECRET_KEYS and value == _REDACTED:
+            continue
+        merged[key] = value
+    return merged
+
+
+def _profile_to_dict(profile, *, redacted: bool) -> dict[str, Any]:
+    config = _decrypt_profile_config(profile.config_json)
+    return {
+        "id": profile.id,
+        "name": profile.name,
+        "provider": profile.provider,
+        "enabled": profile.enabled,
+        "config": _redact_profile_config(config) if redacted else config,
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    }
+
+
 def load_notification_settings(db: Session) -> dict[str, str]:
     """Load and decrypt notification settings for internal use (sending notifications)."""
     from app.models.system_setting import SystemSetting
@@ -136,6 +192,117 @@ def save_notification_setting(db: Session, key: str, value: str) -> None:
         db.add(SystemSetting(key=key, value=stored_value, updated_at=now))
 
 
+def list_notification_profiles(db: Session, *, redacted: bool = True) -> list[dict[str, Any]]:
+    from app.models.notification_profile import NotificationProfile
+
+    _ensure_legacy_notification_profiles(db)
+    profiles = db.scalars(select(NotificationProfile).order_by(NotificationProfile.name)).all()
+    return [_profile_to_dict(profile, redacted=redacted) for profile in profiles]
+
+
+def get_notification_profile(db: Session, profile_id: int, *, redacted: bool = True) -> dict[str, Any] | None:
+    from app.models.notification_profile import NotificationProfile
+
+    profile = db.get(NotificationProfile, profile_id)
+    if not profile:
+        return None
+    return _profile_to_dict(profile, redacted=redacted)
+
+
+def create_notification_profile(
+    db: Session,
+    *,
+    name: str,
+    provider: str,
+    enabled: bool,
+    config: dict[str, Any],
+):
+    from app.models.notification_profile import NotificationProfile
+
+    profile = NotificationProfile(
+        name=name.strip(),
+        provider=provider.strip().lower(),
+        enabled=enabled,
+        config_json=_encrypt_profile_config(config),
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def _ensure_legacy_notification_profiles(db: Session) -> None:
+    from app.models.notification_profile import NotificationProfile
+
+    existing = set(db.scalars(select(NotificationProfile.provider)).all())
+    settings = load_notification_settings(db)
+    candidates: list[tuple[str, str, dict[str, Any]]] = []
+    if "ntfy" not in existing and settings.get("ntfy_url"):
+        candidates.append(("Existing ntfy", "ntfy", {
+            "ntfy_url": settings.get("ntfy_url", ""),
+            "ntfy_token": settings.get("ntfy_token", ""),
+            "method": "ntfy",
+            "method_label": "ntfy",
+        }))
+    if "telegram" not in existing and settings.get("telegram_bot_token") and settings.get("telegram_chat_id"):
+        candidates.append(("Existing Telegram", "telegram", {
+            "telegram_bot_token": settings.get("telegram_bot_token", ""),
+            "telegram_chat_id": settings.get("telegram_chat_id", ""),
+            "method": "telegram",
+            "method_label": "Telegram",
+        }))
+    if (
+        "signal" not in existing
+        and settings.get("signal_url")
+        and settings.get("signal_number")
+        and settings.get("signal_recipient")
+    ):
+        candidates.append(("Existing Signal", "signal", {
+            "signal_url": settings.get("signal_url", ""),
+            "signal_number": settings.get("signal_number", ""),
+            "signal_recipient": settings.get("signal_recipient", ""),
+            "method": "signal",
+            "method_label": "Signal",
+        }))
+    if "smtp" not in existing and settings.get("smtp_host") and settings.get("smtp_to"):
+        candidates.append(("Existing Email", "smtp", {
+            "smtp_host": settings.get("smtp_host", ""),
+            "smtp_port": settings.get("smtp_port", "587"),
+            "smtp_user": settings.get("smtp_user", ""),
+            "smtp_password": settings.get("smtp_password", ""),
+            "smtp_from": settings.get("smtp_from", ""),
+            "smtp_to": settings.get("smtp_to", ""),
+            "smtp_tls": settings.get("smtp_tls", "true"),
+            "method": "smtp",
+            "method_label": "Email (SMTP)",
+        }))
+    if not candidates:
+        return
+    for name, provider, config in candidates:
+        db.add(NotificationProfile(
+            name=name,
+            provider=provider,
+            enabled=True,
+            config_json=_encrypt_profile_config(config),
+        ))
+    db.commit()
+
+
+def update_notification_profile(db: Session, profile, updates: dict[str, Any]):
+    if "name" in updates and updates["name"] is not None:
+        profile.name = updates["name"].strip()
+    if "provider" in updates and updates["provider"] is not None:
+        profile.provider = updates["provider"].strip().lower()
+    if "enabled" in updates and updates["enabled"] is not None:
+        profile.enabled = bool(updates["enabled"])
+    if "config" in updates and updates["config"] is not None:
+        existing = _decrypt_profile_config(profile.config_json)
+        profile.config_json = _encrypt_profile_config(_merge_profile_config(existing, updates["config"]))
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
 def send_notification(channel: str, message: str, settings: dict[str, str]) -> str:
     try:
         if channel == "ntfy":
@@ -152,6 +319,41 @@ def send_notification(channel: str, message: str, settings: dict[str, str]) -> s
         return f"HTTP {exc.code}: delivery failed"
     except Exception as exc:
         logger.warning("Notification delivery failed for channel %s", channel, exc_info=True)
+        return "Error: delivery failed"
+
+
+def send_notification_target(
+    target: str,
+    message: str,
+    settings: dict[str, str],
+    profiles: dict[int, dict[str, Any]],
+) -> str:
+    if target.startswith("profile:"):
+        try:
+            profile_id = int(target.split(":", 1)[1])
+        except ValueError:
+            return f"Invalid notification profile target: {target}"
+        profile = profiles.get(profile_id)
+        if not profile:
+            return f"Notification profile {profile_id} was not found"
+        if not profile.get("enabled", True):
+            return "Notification profile is disabled"
+        return send_notification_profile(profile, message)
+    return send_notification(target, message, settings)
+
+
+def send_notification_profile(profile: dict[str, Any], message: str) -> str:
+    provider = str(profile.get("provider", "")).lower()
+    config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+    try:
+        if provider == "apprise":
+            return _send_apprise(message, config)
+        if provider in LEGACY_CHANNELS:
+            settings = {key: "" if value is None else str(value) for key, value in config.items()}
+            return send_notification(provider, message, settings)
+        return f"Unknown notification provider: {provider}"
+    except Exception:
+        logger.warning("Notification profile delivery failed for provider %s", provider, exc_info=True)
         return "Error: delivery failed"
 
 
@@ -320,3 +522,23 @@ def _send_smtp(message: str, s: dict[str, str], *, subject: str = "NetMap Notifi
                 smtp.login(user, password)
             smtp.send_message(msg)
     return "ok"
+
+
+def _send_apprise(message: str, config: dict[str, Any]) -> str:
+    url = str(config.get("url", "")).strip()
+    if not url:
+        return "Apprise URL is required"
+    parsed = urlparse(url)
+    if parsed.scheme in ("http", "https"):
+        _validate_outbound_url(url)
+    try:
+        import apprise
+    except ImportError:
+        return "Apprise is not installed in this image"
+
+    notifier = apprise.Apprise()
+    if not notifier.add(url):
+        return "Apprise URL was not accepted"
+    title = str(config.get("title", "NetMap")).strip() or "NetMap"
+    ok = notifier.notify(body=message, title=title)
+    return "ok" if ok else "Apprise delivery failed"

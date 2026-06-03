@@ -21,14 +21,24 @@ from app.schemas.admin import (
     SystemSettingsUpdate,
     TestNotificationRequest,
 )
+from app.schemas.notification import (
+    NotificationProfileCreate,
+    NotificationProfileRead,
+    NotificationProfileUpdate,
+)
 from app.services.notifications import (
     NOTIFICATION_DEFAULTS,
     _REDACTED,
     _SECRET_FIELDS,
+    create_notification_profile,
+    get_notification_profile,
+    list_notification_profiles,
     load_notification_settings,
     load_notification_settings_redacted,
     save_notification_setting,
     send_notification,
+    send_notification_profile,
+    update_notification_profile,
 )
 from app.services.rbac.permissions import (
     BUILT_IN_ROLES,
@@ -137,6 +147,74 @@ def test_notification(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, str]:
     result = send_notification(payload.channel, payload.message, load_notification_settings(db))
+    return {"status": result}
+
+
+@router.get("/notification-profiles", response_model=list[NotificationProfileRead])
+def list_notification_profiles_endpoint(
+    _current_user: Annotated[User, Depends(require_super_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[NotificationProfileRead]:
+    return [NotificationProfileRead(**profile) for profile in list_notification_profiles(db, redacted=True)]
+
+
+@router.post("/notification-profiles", response_model=NotificationProfileRead, status_code=status.HTTP_201_CREATED)
+def create_notification_profile_endpoint(
+    payload: NotificationProfileCreate,
+    _current_user: Annotated[User, Depends(require_super_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> NotificationProfileRead:
+    profile = create_notification_profile(
+        db,
+        name=payload.name,
+        provider=payload.provider,
+        enabled=payload.enabled,
+        config=payload.config,
+    )
+    return NotificationProfileRead(**get_notification_profile(db, profile.id, redacted=True))
+
+
+@router.patch("/notification-profiles/{profile_id}", response_model=NotificationProfileRead)
+def update_notification_profile_endpoint(
+    profile_id: int,
+    payload: NotificationProfileUpdate,
+    _current_user: Annotated[User, Depends(require_super_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> NotificationProfileRead:
+    from app.models.notification_profile import NotificationProfile
+
+    profile = db.get(NotificationProfile, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Notification profile not found")
+    update_notification_profile(db, profile, payload.model_dump(exclude_unset=True))
+    return NotificationProfileRead(**get_notification_profile(db, profile_id, redacted=True))
+
+
+@router.delete("/notification-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_notification_profile_endpoint(
+    profile_id: int,
+    _current_user: Annotated[User, Depends(require_super_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    from app.models.notification_profile import NotificationProfile
+
+    profile = db.get(NotificationProfile, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Notification profile not found")
+    db.delete(profile)
+    db.commit()
+
+
+@router.post("/notification-profiles/{profile_id}/test")
+def test_notification_profile_endpoint(
+    profile_id: int,
+    _current_user: Annotated[User, Depends(require_super_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, str]:
+    profile = get_notification_profile(db, profile_id, redacted=False)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Notification profile not found")
+    result = send_notification_profile(profile, "NetMap test notification")
     return {"status": result}
 
 

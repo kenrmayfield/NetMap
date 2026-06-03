@@ -27,7 +27,8 @@ RUN pip install --no-cache-dir --upgrade pip \
        "defusedxml~=0.7.1" \
        "python-jose[cryptography]~=3.3" \
        "dnspython~=2.7" \
-       "reportlab~=4.4"
+       "reportlab~=4.4" \
+       "apprise~=1.9"
 
 COPY backend/app ./app
 

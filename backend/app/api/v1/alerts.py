@@ -13,7 +13,11 @@ from app.models.device import Device
 from app.schemas.alert import AlertEventRead, AlertRuleCreate, AlertRuleRead, AlertRuleUpdate
 from app.models.user import User
 from app.services.alerting.service import AlertMonitorService
-from app.services.notifications import load_notification_settings, send_notification
+from app.services.notifications import (
+    list_notification_profiles,
+    load_notification_settings,
+    send_notification_target,
+)
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -105,6 +109,10 @@ def test_rule(
         raise HTTPException(status_code=400, detail="Rule has no notification channels configured")
 
     notif_settings = load_notification_settings(db)
+    profiles = {
+        int(profile["id"]): profile
+        for profile in list_notification_profiles(db, redacted=False)
+    }
     app_name = AlertMonitorService._get_app_name(db)
 
     # Use the specific device if the rule targets one, otherwise use a placeholder
@@ -133,7 +141,7 @@ def test_rule(
 
     results: dict[str, str] = {}
     for channel in channels:
-        results[channel] = send_notification(channel, message, notif_settings)
+        results[channel] = send_notification_target(channel, message, notif_settings, profiles)
 
     return results
 

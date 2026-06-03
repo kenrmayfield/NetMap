@@ -16,7 +16,11 @@ from app.models.port_target import DevicePortTarget
 from app.models.system_setting import SystemSetting
 from app.schemas.tools import PingRequest
 from app.services.monitoring.port_checker import check_port
-from app.services.notifications import load_notification_settings, send_notification
+from app.services.notifications import (
+    list_notification_profiles,
+    load_notification_settings,
+    send_notification_target,
+)
 from app.services.tools.service import ping_host
 
 logger = logging.getLogger(__name__)
@@ -84,6 +88,10 @@ class AlertMonitorService:
             devices = db.scalars(select(Device).where(Device.status != "disabled")).all()
             rules = db.scalars(select(AlertRule).where(AlertRule.enabled == True)).all()  # noqa: E712
             notif_settings = load_notification_settings(db)
+            profiles = {
+                int(profile["id"]): profile
+                for profile in list_notification_profiles(db, redacted=False)
+            }
             app_name = self._get_app_name(db)
         port_targets = db.scalars(select(DevicePortTarget).where(DevicePortTarget.enabled == True)).all()  # noqa: E712
 
@@ -193,7 +201,7 @@ class AlertMonitorService:
                 message = self._build_message(rule.event_type, label, device.ip_address, new_status, app_name)
 
                 for channel in channels:
-                    result = send_notification(channel, message, notif_settings)
+                    result = send_notification_target(channel, message, notif_settings, profiles)
                     logger.info("Alert '%s' fired via %s: %s", rule.name, channel, result)
 
                 rule_updates.append((rule.id, now))
