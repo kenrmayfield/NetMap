@@ -7,6 +7,7 @@ from app.schemas.tools import PingRequest, TracerouteRequest
 from app.services.tools.service import (
     MAX_TRACEROUTE_PROCESS_TIMEOUT_SECONDS,
     _default_socket_timeout,
+    _run_tool_command,
     _resolve_host,
     _safe_tool_target_argument,
     ping_host,
@@ -82,6 +83,16 @@ def test_ping_host_resolves_hostname_before_subprocess() -> None:
 def test_safe_tool_target_argument_rejects_option_like_values() -> None:
     with pytest.raises(ValueError):
         _safe_tool_target_argument("-Ieth0")
+
+
+def test_run_tool_command_rejects_unsupported_executable() -> None:
+    with pytest.raises(ValueError, match="Unsupported tool command"):
+        _run_tool_command(["sh", "-c", "id"], timeout_seconds=1, timeout_label="Tool")
+
+
+def test_run_tool_command_rejects_control_characters() -> None:
+    with pytest.raises(ValueError, match="Invalid command argument"):
+        _run_tool_command(["ping", "-c", "1", "10.0.0.1\nid"], timeout_seconds=1, timeout_label="Ping")
 
 
 def test_resolve_host_uses_temporary_default_socket_timeout() -> None:

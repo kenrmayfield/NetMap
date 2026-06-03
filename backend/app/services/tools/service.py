@@ -276,6 +276,14 @@ def _run_tool_command(
     timeout_seconds: int | float,
     timeout_label: str,
 ) -> subprocess.CompletedProcess[str]:
+    if not command:
+        raise ValueError("Invalid command")
+    executable = command[0].rsplit("/", 1)[-1]
+    if executable not in {"ping", "traceroute", "traceroute6"}:
+        raise ValueError("Unsupported tool command")
+    for arg in command[1:]:
+        if not isinstance(arg, str) or any(ch in arg for ch in ("\x00", "\n", "\r")):
+            raise ValueError("Invalid command argument")
     try:
         return subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
