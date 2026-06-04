@@ -6,9 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import DatabaseError
 
 from app.core.config import settings
-from app.db.firewall_session import FirewallSessionLocal as SessionLocal
+from app.db.firewall_session import (
+    FirewallSessionLocal as SessionLocal,
+    is_corrupt_firewall_db_error,
+    reset_firewall_db_after_corruption,
+)
 from app.models.firewall_event import FirewallEvent
 from app.services.syslog.parser import ParsedFirewallEvent, parse_syslog_line
 from app.websocket.firewall_events import firewall_event_broadcaster
@@ -97,6 +102,24 @@ def cleanup_expired_events() -> int:
             result = db.execute(delete(FirewallEvent).where(FirewallEvent.received_at < cutoff))
             db.commit()
         deleted = int(result.rowcount or 0)
+    except DatabaseError as exc:
+        if is_corrupt_firewall_db_error(exc):
+            logger.warning(
+                "firewall.db is corrupt during retention cleanup; deleting and recreating "
+                "(syslog history lost)",
+                exc_info=True,
+            )
+            reset_firewall_db_after_corruption()
+            update_retention_status(
+                started_at,
+                0,
+                "firewall.db was corrupt during retention cleanup and was recreated; syslog history was lost",
+            )
+            with _retention_status_lock:
+                _retention_status.event_count = 0
+            return 0
+        update_retention_status(started_at, 0, str(exc))
+        raise
     except Exception as exc:
         update_retention_status(started_at, 0, str(exc))
         raise

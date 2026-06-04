@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Annotated
 
 from datetime import datetime
@@ -22,6 +23,7 @@ from app.websocket.firewall_events import firewall_event_broadcaster
 router = APIRouter(prefix="/syslog", tags=["syslog"])
 
 _active_ws_connections = 0
+FTS_TERM_RE = re.compile(r"[A-Za-z0-9_]+")
 
 SORT_COLUMNS = {
     "received_at": FirewallEvent.received_at,
@@ -36,9 +38,11 @@ SORT_COLUMNS = {
 }
 
 
-def fts_query(raw_query: str) -> str:
-    escaped = raw_query.strip().replace('"', '""')
-    return f'"{escaped}"'
+def fts_query(raw_query: str) -> str | None:
+    terms = FTS_TERM_RE.findall(raw_query)
+    if not terms:
+        return None
+    return " AND ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
 
 
 @router.get("/status", response_model=SyslogStatus)
@@ -217,19 +221,20 @@ def apply_event_filters(
         if not search_value:
             return query
         like = f"%{q.strip()}%"
-        raw_log_matches = select(text("rowid")).select_from(text("firewall_events_fts")).where(
-            text("firewall_events_fts MATCH :fts_query")
-        ).params(fts_query=fts_query(search_value))
-        query = query.where(
-            or_(
-                FirewallEvent.id.in_(raw_log_matches),
-                FirewallEvent.src_ip.ilike(like),
-                FirewallEvent.dst_ip.ilike(like),
-                FirewallEvent.source_host.ilike(like),
-                FirewallEvent.rule_id.ilike(like),
-                FirewallEvent.reason.ilike(like),
-            ),
-        )
+        conditions = [
+            FirewallEvent.src_ip.ilike(like),
+            FirewallEvent.dst_ip.ilike(like),
+            FirewallEvent.source_host.ilike(like),
+            FirewallEvent.rule_id.ilike(like),
+            FirewallEvent.reason.ilike(like),
+        ]
+        raw_fts_query = fts_query(search_value)
+        if raw_fts_query is not None:
+            raw_log_matches = select(text("rowid")).select_from(text("firewall_events_fts")).where(
+                text("firewall_events_fts MATCH :fts_query")
+            ).params(fts_query=raw_fts_query)
+            conditions.insert(0, FirewallEvent.id.in_(raw_log_matches))
+        query = query.where(or_(*conditions))
     if src_ip:
         query = query.where(FirewallEvent.src_ip == src_ip.strip())
     if dst_ip:

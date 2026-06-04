@@ -62,7 +62,7 @@ def init_firewall_db() -> None:
     try:
         FirewallBase.metadata.create_all(bind=firewall_engine)
     except DatabaseError as exc:
-        if not _is_corrupt_db_error(exc):
+        if not is_corrupt_firewall_db_error(exc):
             raise
         schema_corrupt = True
         logger.warning(
@@ -71,12 +71,7 @@ def init_firewall_db() -> None:
         )
 
     if schema_corrupt:
-        # Close all pooled connections before touching the file.
-        firewall_engine.dispose()
-        db_path = _firewall_db_path()
-        for path in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
-            path.unlink(missing_ok=True)
-        FirewallBase.metadata.create_all(bind=firewall_engine)
+        reset_firewall_db_after_corruption()
 
     init_firewall_fts()
 
@@ -219,9 +214,21 @@ def _is_malformed_fts_error(exc: DatabaseError) -> bool:
     return "database disk image is malformed" in str(exc).lower()
 
 
-def _is_corrupt_db_error(exc: DatabaseError) -> bool:
+def is_corrupt_firewall_db_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return "malformed database schema" in msg or "database disk image is malformed" in msg
+
+
+def reset_firewall_db_after_corruption() -> None:
+    from app.models.firewall_event import FirewallEvent  # noqa: F401
+
+    # Close all pooled connections before touching the file.
+    firewall_engine.dispose()
+    db_path = _firewall_db_path()
+    for path in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
+        path.unlink(missing_ok=True)
+    FirewallBase.metadata.create_all(bind=firewall_engine)
+    init_firewall_fts()
 
 
 def _firewall_fts_exists(conn) -> bool:
