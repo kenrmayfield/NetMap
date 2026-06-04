@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.2.7] - 2026-06-04
+
+### Discovery
+- Discovery now recognizes existing devices by normalized MAC address when a DHCP/Wi-Fi device returns at a new IP.
+- Discovery import can explicitly update the IP address for a MAC-matched device when "Update IP when MAC matches" is selected.
+- Discovery scans can use saved SNMP profiles for enrichment instead of requiring a raw community string.
+
+### Monitoring
+- Cleaned up the selected-device RTT chart with a lighter line, subtle guide grid, smaller endpoint marker, and dark-mode chart colors.
+- Inventory uses the shared Monitoring-style live status pill, while Topology no longer shows a map-level Live/Paused pill.
+
+### Security / Syslog
+- OpenWrt banIP firewall prefixes now parse action, chain/context, and feed/list metadata.
+- Security filters now use draft values with an explicit Search button or Enter key; quick filters and clickable event cells still apply immediately.
+- Active network tool subprocess execution now allowlists ping/traceroute commands and rejects control characters in command arguments.
+
+### Notifications / Alerts
+- Added notification profiles with encrypted per-profile configuration, enable/disable controls, and test sends.
+- Added Apprise-backed notification delivery support for additional providers and custom Apprise URLs.
+- Alert rules can target notification profiles while retaining compatibility with legacy channel settings.
+
+### Exports / Operations
+- Network report PDF generation now skips malformed or unreadable `firewall.db` summary data instead of returning HTTP 500.
+- Added database backup and restore controls for SuperAdmin users.
+- Production now tracks release candidate `1.2.7`.
+
+---
+
 ## [1.2.6] - 2026-06-01
 
 ### Discovery
