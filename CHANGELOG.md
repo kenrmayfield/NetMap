@@ -3,6 +3,8 @@
 ## [1.2.7] - 2026-06-03
 
 ### Discovery
+- Added scheduled discovery scans with review-only network-change observations for new devices, MAC-matched IP changes, changed device fields, and disappeared hosts.
+- Discovery schedules can run automatically or on demand, retain normal scan records, optionally notify through saved notification profiles, and avoid silently mutating inventory.
 - Discovery now recognizes existing devices by normalized MAC address when a DHCP/Wi-Fi device returns at a new IP.
 - Discovery import can explicitly update the IP address for a MAC-matched device when "Update IP when MAC matches" is selected.
 
@@ -10,6 +12,13 @@
 - Cleaned up the selected-device RTT chart with a lighter line, subtle guide grid, smaller endpoint marker, and dark-mode chart colors.
 - Inventory uses the shared Monitoring-style live status pill, while Topology no longer shows a map-level Live/Paused pill.
 - Monitoring device analysis now normalizes SQLite-returned timestamps as UTC before Python-side comparisons, preventing 500 errors from mixed naive/aware datetimes.
+- Persisted monitoring status now feeds the shared frontend graph and Topology canvas, so status changes update node badges, details, and graph colors consistently instead of only the Inventory table.
+- Background monitoring now falls back to a short TCP reachability probe when ICMP ping is unavailable, avoiding all devices being marked `unknown` in restricted container runtimes.
+- Fixed a bug where the port-target DB query ran outside its SQLAlchemy session context, causing every monitor cycle to raise an error and never write device status or history rows to the database.
+- Favourite device status dots on the Overview page now reflect the live polling state from the shared graph rather than the one-time snapshot loaded on mount.
+
+### Topology
+- Scaled the topology group background slider so the UI still runs 0-100% while the effective background opacity stays capped at 10%.
 
 ### Security / Syslog
 - OpenWrt banIP firewall prefixes now parse action, chain/context, and feed/list metadata.
@@ -18,6 +27,9 @@
 - Security raw-log search now matches individual prefix terms instead of requiring the full query as an exact phrase.
 - Security filters now use draft values with an explicit Search button or Enter key; quick filters and clickable event cells still apply immediately.
 - Active network tool subprocess execution now allowlists ping/traceroute commands and rejects control characters in command arguments.
+
+### UI / General
+- Overview panel headers are now consistent: top-row panels (Network health, Device types, Top groups) all use the standard header height, and the bottom-row Favourites header uses the compact variant so it aligns with Recently updated.
 
 ### Exports / Operations
 - Network report PDF generation now skips malformed or unreadable `firewall.db` summary data instead of returning HTTP 500.

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
+import socket
 import threading
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -27,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = 300
 HISTORY_RETAIN_DAYS = 30
+LIVE_STATUS_FALLBACK_PORTS = (22, 80, 443, 53)
+LIVE_STATUS_FALLBACK_TIMEOUT_SECONDS = 0.5
+MONITOR_STATUS_WORKERS = 12
 
 
 class AlertMonitorService:
@@ -87,13 +93,13 @@ class AlertMonitorService:
         with SessionLocal() as db:
             devices = db.scalars(select(Device).where(Device.status != "disabled")).all()
             rules = db.scalars(select(AlertRule).where(AlertRule.enabled == True)).all()  # noqa: E712
+            port_targets = db.scalars(select(DevicePortTarget).where(DevicePortTarget.enabled == True)).all()  # noqa: E712
             notif_settings = load_notification_settings(db)
             profiles = {
                 int(profile["id"]): profile
                 for profile in list_notification_profiles(db, redacted=False)
             }
             app_name = self._get_app_name(db)
-        port_targets = db.scalars(select(DevicePortTarget).where(DevicePortTarget.enabled == True)).all()  # noqa: E712
 
         if not devices:
             self._initialized = True
@@ -111,19 +117,20 @@ class AlertMonitorService:
         rtt_map: dict[int, float | None] = {}
         port_map: dict[int, list[dict]] = {}
 
-        for device in devices:
-            try:
-                result = ping_host(PingRequest(host=device.ip_address, count=2, timeout_seconds=2))
-                if result.received > 0:
-                    current[device.id] = "online"
-                    rtt_map[device.id] = result.average_ms
-                else:
-                    current[device.id] = "offline"
-                    rtt_map[device.id] = None
-            except Exception:
-                current[device.id] = "unknown"
-                rtt_map[device.id] = None
+        workers = max(1, min(MONITOR_STATUS_WORKERS, len(devices)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {executor.submit(self._probe_device_status, device): device.id for device in devices}
+            for future in as_completed(future_map):
+                device_id = future_map[future]
+                try:
+                    status, rtt_ms = future.result()
+                except Exception:
+                    logger.exception("Probe thread raised for device %d", device_id)
+                    status, rtt_ms = "unknown", None
+                current[device_id] = status
+                rtt_map[device_id] = rtt_ms
 
+        for device in devices:
             # Port checks
             ports_to_check = global_ports + device_extra_ports.get(device.id, [])
             port_results = []
@@ -225,6 +232,28 @@ class AlertMonitorService:
                 db.commit()
 
         self._known = current
+
+    def _probe_device_status(self, device: Device) -> tuple[str, float | None]:
+        try:
+            result = ping_host(PingRequest(host=device.ip_address, count=2, timeout_seconds=2))
+            if result.received > 0:
+                return "online", result.average_ms
+            return "offline", None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ICMP monitor failed for %s: %s", device.ip_address, exc)
+
+        for port in LIVE_STATUS_FALLBACK_PORTS:
+            try:
+                started = time.perf_counter()
+                with socket.create_connection(
+                    (device.ip_address, port),
+                    timeout=LIVE_STATUS_FALLBACK_TIMEOUT_SECONDS,
+                ):
+                    return "online", round((time.perf_counter() - started) * 1000, 2)
+            except OSError:
+                continue
+
+        return "offline", None
 
     def _prune_history(self) -> None:
         now = datetime.now(timezone.utc)
