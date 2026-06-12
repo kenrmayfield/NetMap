@@ -15,6 +15,8 @@
 - Persisted monitoring status now feeds the shared frontend graph and Topology canvas, so status changes update node badges, details, and graph colors consistently instead of only the Inventory table.
 - Background monitoring now falls back to a short TCP reachability probe when ICMP ping is unavailable, avoiding all devices being marked `unknown` in restricted container runtimes.
 - Fixed a bug where the port-target DB query ran outside its SQLAlchemy session context, causing every monitor cycle to raise an error and never write device status or history rows to the database.
+- Reduced the initial startup delay before the first monitor cycle from 30 seconds to 5 seconds so status indicators appear promptly after the container starts.
+- Reduced the per-device ICMP probe from 2 packets / 2-second timeout to 1 packet / 1-second timeout, halving the check duration for offline devices without affecting cycle reliability.
 - Favourite device status dots on the Overview page now reflect the live polling state from the shared graph rather than the one-time snapshot loaded on mount.
 
 ### Topology
@@ -28,11 +30,23 @@
 - Security filters now use draft values with an explicit Search button or Enter key; quick filters and clickable event cells still apply immediately.
 - Active network tool subprocess execution now allowlists ping/traceroute commands and rejects control characters in command arguments.
 
+### Admin
+- Added an Automation tab to the Admin panel with scheduled scan management (create, enable/pause, run on demand, delete) and a change observations panel (new device, IP change, field change, disappeared) with acknowledge and resolve actions.
+
 ### UI / General
 - Overview panel headers are now consistent: top-row panels (Network health, Device types, Top groups) all use the standard header height, and the bottom-row Favourites header uses the compact variant so it aligns with Recently updated.
+- Monitoring table now has a status filter dropdown (All / Online / Offline / Warning / Unknown) and a sortable status column header (asc = online first, desc = offline first).
+- Topology entity dropdowns (Devices, Links, Groups) now have a sticky search bar that clears automatically when switching sections; items filter in real time against name, IP, link endpoints/type, or group name.
+- Hovering a row in the entity panel now illuminates the corresponding node/edge on the canvas via a Cytoscape shadow glow (teal for devices and their connected edges, purple for group zones and member nodes, teal for link endpoints).
+- Topology entity dropdown rows glow on hover via a subtle ring box-shadow (teal for devices/links, purple for groups).
+- Search bar in dark mode now inherits the dropdown background seamlessly instead of rendering with a distinct white box.
+- Fixed topology groups dropdown rendering the visibility eye button on a blank second line by correcting the grid column count from 3 to 4.
+- Fixed topology links dropdown arrow asymmetry by centering the arrow glyph and widening its column from 14px to 22px.
 
 ### Exports / Operations
+- Dev AIO compose now defaults `TRUSTED_HOSTS` to `["*"]` so local dev images can be opened through LAN IPs or hostnames without the SPA startup API calls returning 400.
 - Network report PDF generation now skips malformed or unreadable `firewall.db` summary data instead of returning HTTP 500.
+- Topology PNG export now renders via SVG→canvas using the same drawing logic as the SVG download; device icons, group zone boxes and labels, device name labels, and link labels (with background pill matching live-map style) all export correctly. Export is theme-aware (light/dark mode colours). Edge lines clip to each node's bounding-box boundary so connections to large zone groups terminate at the zone border rather than the center.
 - Dev and test builds now track candidate `1.2.7` while production remains `1.2.6`.
 
 ---

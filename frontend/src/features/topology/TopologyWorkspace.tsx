@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import cytoscape, { type Core } from "cytoscape";
-import { Network, EyeOff, Eye, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Network, EyeOff, Eye, ChevronDown, ChevronUp } from "lucide-react";
 import { IconServer, IconWifi, IconWifiOff, IconTopologyRing } from "@tabler/icons-react";
 import {
   api,
@@ -19,7 +19,7 @@ import {
 import { compareGroupLabels } from "../../utils/sort";
 import { deviceLabel, statusColor } from "../../utils/format";
 import { deviceIconUrl, deviceIconPath, resolveDeviceIcon } from "../../icons";
-import { downloadDataUrl, downloadTextFile, buildTopologySvg } from "../../utils/download";
+import { downloadDataUrl, downloadTextFile, buildTopologySvg, topologySvgDimensions, edgeClippedEndpoints } from "../../utils/download";
 import { relationshipVisualSourceNodeId, relationshipVisualTargetNodeId } from "../../utils/relationship";
 import { DeviceDetails } from "../devices/DeviceDetails";
 import { DeviceForm } from "../devices/DeviceForm";
@@ -64,6 +64,8 @@ export function TopologyWorkspace({
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [selectedRelationshipId, setSelectedRelationshipId] = useState<number | null>(null);
   const [expandedEntitySection, setExpandedEntitySection] = useState<"devices" | "relationships" | "groups" | null>(null);
+  const [entitySearch, setEntitySearch] = useState("");
+  const [panelHoveredDeviceId, setPanelHoveredDeviceId] = useState<number | null>(null);
   const [cloningDevice, setCloningDevice] = useState<Device | null>(null);
   const [showDeviceForm, setShowDeviceForm] = useState(false);
   const [showRelationshipForm, setShowRelationshipForm] = useState(false);
@@ -390,6 +392,36 @@ export function TopologyWorkspace({
     return [...names].sort(compareGroupLabels);
   }, [liveGraph.devices]);
 
+  useEffect(() => { setEntitySearch(""); }, [expandedEntitySection]);
+
+  const filteredEntityDevices = useMemo(() => {
+    const q = entitySearch.toLowerCase();
+    if (!q) return filteredGraph.devices;
+    return filteredGraph.devices.filter((d) =>
+      deviceLabel(d).toLowerCase().includes(q) || d.ip_address.toLowerCase().includes(q),
+    );
+  }, [entitySearch, filteredGraph.devices]);
+
+  const filteredEntityRelationships = useMemo(() => {
+    const q = entitySearch.toLowerCase();
+    if (!q) return filteredGraph.relationships;
+    return filteredGraph.relationships.filter((rel) => {
+      const src = liveGraph.devices.find((d) => d.id === rel.source_device_id);
+      const tgt = liveGraph.devices.find((d) => d.id === rel.target_device_id);
+      return (
+        (src && deviceLabel(src).toLowerCase().includes(q)) ||
+        (tgt && deviceLabel(tgt).toLowerCase().includes(q)) ||
+        (rel.relationship_type ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [entitySearch, filteredGraph.relationships, liveGraph.devices]);
+
+  const filteredEntityGroups = useMemo(() => {
+    const q = entitySearch.toLowerCase();
+    if (!q) return allGroupNames;
+    return allGroupNames.filter((g) => g.toLowerCase().includes(q));
+  }, [entitySearch, allGroupNames]);
+
   useEffect(() => {
     localStorage.setItem(`netmap.topology-hidden-groups.${userId}`, JSON.stringify([...hiddenGroupNames]));
   }, [hiddenGroupNames, userId]);
@@ -419,19 +451,22 @@ export function TopologyWorkspace({
         const position = node.renderedPosition();
         const label = deviceLabel(device);
         const nodeScale = Math.max(0.7, Math.min(2.2, Number(node.data("nodeScale") ?? 1)));
+        const liveStatus = livePingEnabled ? (liveStatusByDeviceId.get(device.id)?.status ?? device.monitor_status ?? device.status) : "paused";
+        const colorStatus = liveStatus === "paused" ? "unknown" : liveStatus;
+        const color = device.color || statusColor(colorStatus);
         return {
           id: device.id,
           x: position.x,
           y: position.y,
           lines: label.split("\n"),
-          color: device.color || statusColor(device.monitor_status ?? device.status),
+          color,
           icon: resolveDeviceIcon(device.icon),
           size: Math.round(30 * nodeScale),
         };
       })
       .filter((row): row is { id: number; x: number; y: number; lines: string[]; color: string; icon: DeviceIcon; size: number } => row !== null);
     setOverlayNodes(nextNodes);
-  }, [activeIconPackId, filteredGraph.devices]);
+  }, [activeIconPackId, filteredGraph.devices, livePingEnabled, liveStatusByDeviceId]);
 
   useEffect(() => {
     refreshOverlayNodesRef.current = refreshOverlayNodes;
@@ -468,12 +503,17 @@ export function TopologyWorkspace({
       return;
     }
     try {
-      const deviceIds = liveGraph.devices.slice(0, 64).map((device) => device.id);
-      const response = await api.topologyLiveStatuses(accessToken, {
-        device_ids: deviceIds,
-        timeout_seconds: 2,
-      });
-      setLiveStatuses(response.statuses);
+      const rows = await api.listMonitoringDevices(accessToken);
+      const visibleIds = new Set(liveGraph.devices.map((device) => device.id));
+      setLiveStatuses(rows
+        .filter((row) => visibleIds.has(row.device_id))
+        .map((row) => ({
+          device_id: row.device_id,
+          status: row.status === "online" || row.status === "offline" || row.status === "warning" || row.status === "unknown" || row.status === "disabled" ? row.status : "unknown",
+          latency_ms: row.avg_rtt_24h,
+          last_checked_at: row.last_checked ?? new Date().toISOString(),
+          error: null,
+        })));
     } catch (err) {
       if (!silent) {
         setTopologyError(err instanceof Error ? err.message : "Unable to refresh live status");
@@ -697,6 +737,40 @@ export function TopologyWorkspace({
               width: 58,
             },
           },
+          {
+            selector: "node.device.panel-hover",
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            style: {
+              "shadow-blur": 22,
+              "shadow-color": "#1d9ab0",
+              "shadow-opacity": 0.55,
+              "shadow-offset-x": 0,
+              "shadow-offset-y": 0,
+              opacity: 1,
+              "z-index": 80,
+            } as any,
+          },
+          {
+            selector: "node.zone.panel-hover",
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            style: {
+              "shadow-blur": 18,
+              "shadow-color": "#8040c0",
+              "shadow-opacity": 0.4,
+              "shadow-offset-x": 0,
+              "shadow-offset-y": 0,
+            } as any,
+          },
+          {
+            selector: "edge.panel-hover",
+            style: {
+              "line-color": "#1d9ab0",
+              "target-arrow-color": "#1d9ab0",
+              width: 4,
+              opacity: 1,
+              "z-index": 50,
+            },
+          },
         ],
       });
       cyRef.current.on("tap", "node.device", (event) => {
@@ -814,6 +888,8 @@ export function TopologyWorkspace({
       })),
       ...filteredGraph.devices.map((device) => {
         const liveStatus = livePingEnabled ? (liveStatusByDeviceId.get(device.id)?.status ?? device.monitor_status ?? "unknown") : "paused";
+        const colorStatus = liveStatus === "paused" ? "unknown" : liveStatus;
+        const nodeColor = device.color || statusColor(colorStatus);
         const nodeScale = (groupDisplayPrefs[device.topology_group]?.nodeScalePercent ?? 140) / 100;
         const iconSize = Math.round(30 * Math.max(0.7, Math.min(2.2, nodeScale)));
         const hitSize = Math.max(36, iconSize + 14);
@@ -824,8 +900,8 @@ export function TopologyWorkspace({
             id: `device-${device.id}`,
             label: deviceLabel(device),
             labelColor: theme === "dark" ? "#ffffff" : "#111111",
-            color: device.color || statusColor(device.monitor_status ?? device.status),
-            iconUrl: deviceIconUrl(device.icon, device.color || statusColor(device.monitor_status ?? device.status)),
+            color: nodeColor,
+            iconUrl: deviceIconUrl(device.icon, nodeColor),
             icon: resolveDeviceIcon(device.icon),
             parent: groupId(device.topology_group),
             nodeScale,
@@ -1407,18 +1483,92 @@ export function TopologyWorkspace({
 
   function exportTopologyPng() {
     const cy = cyRef.current;
-    if (!cy) {
-      return;
-    }
-    downloadDataUrl(cy.png({ full: true, bg: "#fbfdfe", scale: 2 }), "netmap-topology.png");
+    if (!cy) return;
+    const isDark = document.body.classList.contains("theme-dark");
+    const { width, height, offsetX, offsetY } = topologySvgDimensions(cy);
+    // skipText=true: SVG carries only shapes/icons; all text is drawn on canvas
+    // directly so it always renders regardless of browser SVG-as-image quirks.
+    const svgStr = buildTopologySvg(cy, isDark, true);
+    const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { URL.revokeObjectURL(url); return; }
+      ctx.scale(scale, scale);
+      ctx.fillStyle = isDark ? "#0c1118" : "#fbfdfe";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+
+      // Zone labels above their boxes
+      const zoneLabelColor = isDark ? "#8ab0c8" : "#263b4b";
+      ctx.font = "700 13px Arial, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = zoneLabelColor;
+      cy.nodes(".zone").forEach((zone) => {
+        const pos = zone.position();
+        const top  = pos.y - zone.height() / 2 + offsetY;
+        const left = pos.x - zone.width()  / 2 + offsetX;
+        ctx.fillText(String(zone.data("label") ?? ""), left + 14, top - 6);
+      });
+
+      // Device labels below icons
+      const deviceLabelColor = isDark ? "#d7e2ea" : "#13212b";
+      ctx.font = "600 12px Arial, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = deviceLabelColor;
+      cy.nodes(".device").forEach((node) => {
+        const pos = node.position();
+        const nodeScale = Math.max(0.7, Math.min(2.2, Number(node.data("nodeScale") ?? 1)));
+        const size = Math.max(30, Math.min(130, 44 * nodeScale));
+        const x = pos.x + offsetX;
+        const labelY = pos.y + offsetY + size / 2 + 14;
+        const label = String(node.data("label") ?? "");
+        label.split("\n").forEach((line, index) => {
+          ctx.fillText(line, x, labelY + index * 14);
+        });
+      });
+
+      // Edge (link) labels at midpoint of the clipped edge line
+      const edgeTxtColor = isDark ? "#c8dae8" : "#2a4055";
+      const edgeBgColor  = isDark ? "#1d2f40" : "#eef3f7";
+      ctx.font = `${edgeLabelFontSize}px Arial, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      cy.edges().forEach((edge) => {
+        const label = String(edge.data("label") ?? "");
+        if (!label) return;
+        const ep = edgeClippedEndpoints(edge, offsetX, offsetY);
+        if (!ep) return;
+        const mx = (ep.sx + ep.tx) / 2;
+        const my = (ep.sy + ep.ty) / 2;
+        const metrics = ctx.measureText(label);
+        const pad = 4;
+        const bw = metrics.width + pad * 2;
+        const bh = edgeLabelFontSize + pad * 2;
+        ctx.fillStyle = edgeBgColor;
+        ctx.fillRect(mx - bw / 2, my - bh / 2, bw, bh);
+        ctx.fillStyle = edgeTxtColor;
+        ctx.fillText(label, mx, my);
+      });
+
+      downloadDataUrl(canvas.toDataURL("image/png"), "netmap-topology.png");
+    };
+    img.src = url;
   }
 
   function exportTopologySvg() {
     const cy = cyRef.current;
-    if (!cy) {
-      return;
-    }
-    downloadTextFile(buildTopologySvg(cy), "netmap-topology.svg", "image/svg+xml");
+    if (!cy) return;
+    const isDark = document.body.classList.contains("theme-dark");
+    downloadTextFile(buildTopologySvg(cy, isDark), "netmap-topology.svg", "image/svg+xml");
   }
 
   return (
@@ -1458,10 +1608,24 @@ export function TopologyWorkspace({
         </div>
         {expandedEntitySection && (
           <div className="topo-entity-list">
+            <div className="topo-entity-search-wrap">
+              <Search size={12} className="topo-entity-search-icon" />
+              <input
+                className="topo-entity-search"
+                placeholder={`Search ${expandedEntitySection === "relationships" ? "links" : expandedEntitySection}…`}
+                value={entitySearch}
+                onChange={(e) => setEntitySearch(e.target.value)}
+                autoFocus
+              />
+              {entitySearch && (
+                <button type="button" className="topo-entity-search-clear" onClick={() => setEntitySearch("")} aria-label="Clear search">×</button>
+              )}
+            </div>
+            <div className="topo-entity-scroll">
             {expandedEntitySection === "devices" && (
-              filteredGraph.devices.length === 0
-                ? <p className="topo-entity-empty">No devices</p>
-                : filteredGraph.devices.map((device) => {
+              filteredEntityDevices.length === 0
+                ? <p className="topo-entity-empty">{entitySearch ? "No devices match" : "No devices"}</p>
+                : filteredEntityDevices.map((device) => {
                     const liveStatus = livePingEnabled ? liveStatusByDeviceId.get(device.id) : null;
                     const dotStatus = device.status === "disabled" ? "disabled" : livePingEnabled ? (liveStatus?.status ?? device.monitor_status ?? device.status) : "paused";
                     return (
@@ -1470,6 +1634,14 @@ export function TopologyWorkspace({
                         type="button"
                         className={`topo-entity-row${selectedDeviceId === device.id ? " topo-entity-row--active" : ""}`}
                         onClick={() => { setSelectedDeviceId(device.id); setSelectedRelationshipId(null); setExpandedEntitySection(null); }}
+                        onMouseEnter={() => {
+                          setPanelHoveredDeviceId(device.id);
+                          cyRef.current?.getElementById(`device-${device.id}`)?.connectedEdges().addClass("panel-hover");
+                        }}
+                        onMouseLeave={() => {
+                          setPanelHoveredDeviceId(null);
+                          cyRef.current?.getElementById(`device-${device.id}`)?.connectedEdges().removeClass("panel-hover");
+                        }}
                       >
                         <span className={`status-dot status-dot--sm ${dotStatus}`} />
                         <span className="topo-entity-name">{deviceLabel(device)}</span>
@@ -1479,17 +1651,27 @@ export function TopologyWorkspace({
                   })
             )}
             {expandedEntitySection === "relationships" && (
-              filteredGraph.relationships.length === 0
-                ? <p className="topo-entity-empty">No links</p>
-                : filteredGraph.relationships.map((rel) => {
+              filteredEntityRelationships.length === 0
+                ? <p className="topo-entity-empty">{entitySearch ? "No links match" : "No links"}</p>
+                : filteredEntityRelationships.map((rel) => {
                     const src = liveGraph.devices.find((d) => d.id === rel.source_device_id);
                     const tgt = liveGraph.devices.find((d) => d.id === rel.target_device_id);
                     return (
                       <button
                         key={rel.id}
                         type="button"
-                        className={`topo-entity-row${selectedRelationshipId === rel.id ? " topo-entity-row--active" : ""}`}
+                        className={`topo-entity-row topo-entity-row--relationship${selectedRelationshipId === rel.id ? " topo-entity-row--active" : ""}`}
                         onClick={() => { setSelectedRelationshipId(rel.id); setSelectedDeviceId(null); setExpandedEntitySection(null); }}
+                        onMouseEnter={() => {
+                          const edge = cyRef.current?.getElementById(`relationship-${rel.id}`);
+                          edge?.addClass("panel-hover");
+                          edge?.connectedNodes().addClass("panel-hover");
+                        }}
+                        onMouseLeave={() => {
+                          const edge = cyRef.current?.getElementById(`relationship-${rel.id}`);
+                          edge?.removeClass("panel-hover");
+                          edge?.connectedNodes().removeClass("panel-hover");
+                        }}
                       >
                         <span className="topo-entity-name">{src ? deviceLabel(src) : `#${rel.source_device_id}`}</span>
                         <span className="topo-entity-arrow">→</span>
@@ -1500,15 +1682,30 @@ export function TopologyWorkspace({
                   })
             )}
             {expandedEntitySection === "groups" && (
-              allGroupNames.length === 0
-                ? <p className="topo-entity-empty">No groups</p>
-                : allGroupNames.map((groupName) => {
+              filteredEntityGroups.length === 0
+                ? <p className="topo-entity-empty">{entitySearch ? "No groups match" : "No groups"}</p>
+                : filteredEntityGroups.map((groupName) => {
                     const isHidden = hiddenGroupNames.has(groupName);
                     const count = liveGraph.devices.filter(
                       (d) => d.status !== "disabled" && (d.topology_group ?? "Ungrouped") === groupName,
                     ).length;
                     return (
-                      <div key={groupName} className={`topo-entity-row topo-entity-row--group${isHidden ? " topo-entity-row--hidden" : ""}`}>
+                      <div
+                        key={groupName}
+                        className={`topo-entity-row topo-entity-row--group${isHidden ? " topo-entity-row--hidden" : ""}`}
+                        onMouseEnter={() => {
+                          const cy = cyRef.current;
+                          if (!cy) return;
+                          cy.getElementById(groupId(groupName)).addClass("panel-hover");
+                          cy.nodes(`[topology_group = "${groupName}"]`).addClass("panel-hover");
+                        }}
+                        onMouseLeave={() => {
+                          const cy = cyRef.current;
+                          if (!cy) return;
+                          cy.getElementById(groupId(groupName)).removeClass("panel-hover");
+                          cy.nodes(`[topology_group = "${groupName}"]`).removeClass("panel-hover");
+                        }}
+                      >
                         <span className="topo-entity-group-dot" />
                         <span className="topo-entity-name">{groupName}</span>
                         <span className="topo-entity-meta">{count} device{count !== 1 ? "s" : ""}</span>
@@ -1524,6 +1721,7 @@ export function TopologyWorkspace({
                     );
                   })
             )}
+            </div>
           </div>
         )}
       </div>
@@ -1774,7 +1972,7 @@ export function TopologyWorkspace({
               <button
                 key={`overlay-${node.id}`}
                 type="button"
-                className={`topology-overlay-node${selectedDeviceId === node.id ? " selected" : ""}`}
+                className={`topology-overlay-node${selectedDeviceId === node.id ? " selected" : ""}${panelHoveredDeviceId === node.id ? " panel-glow" : ""}`}
                 style={{ left: `${node.x}px`, top: `${node.y}px` }}
                 onClick={() => {
                   setSelectedDeviceId(node.id);

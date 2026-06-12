@@ -1,4 +1,4 @@
-import type { Core } from "cytoscape";
+import type { Core, EdgeSingular } from "cytoscape";
 import type { DownloadResult } from "../api/client";
 import { resolveDeviceIcon, deviceIconPath } from "../icons";
 
@@ -38,64 +38,123 @@ export function escapeXml(value: string) {
     .replace(/'/g, "&apos;");
 }
 
-export function buildTopologySvg(cy: Core) {
+// Returns the edge endpoints clipped to each node's bounding-box boundary so
+// straight-line edges don't pierce into the interior of large zone nodes.
+export function edgeClippedEndpoints(
+  edge: EdgeSingular,
+  offsetX: number,
+  offsetY: number,
+): { sx: number; sy: number; tx: number; ty: number } | null {
+  const srcPos = edge.source().position();
+  const tgtPos = edge.target().position();
+  if (!srcPos || !tgtPos) return null;
+  const dx = tgtPos.x - srcPos.x;
+  const dy = tgtPos.y - srcPos.y;
+  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+    return { sx: srcPos.x + offsetX, sy: srcPos.y + offsetY, tx: tgtPos.x + offsetX, ty: tgtPos.y + offsetY };
+  }
+  const srcHW = edge.source().width() / 2;
+  const srcHH = edge.source().height() / 2;
+  const tgtHW = edge.target().width() / 2;
+  const tgtHH = edge.target().height() / 2;
+  // t such that (pos + t*dir) lands on the rectangle boundary
+  const tSrc = Math.min(dx !== 0 ? srcHW / Math.abs(dx) : Infinity, dy !== 0 ? srcHH / Math.abs(dy) : Infinity);
+  const tTgt = Math.min(dx !== 0 ? tgtHW / Math.abs(dx) : Infinity, dy !== 0 ? tgtHH / Math.abs(dy) : Infinity);
+  return {
+    sx: srcPos.x + tSrc * dx + offsetX,
+    sy: srcPos.y + tSrc * dy + offsetY,
+    tx: tgtPos.x - tTgt * dx + offsetX,
+    ty: tgtPos.y - tTgt * dy + offsetY,
+  };
+}
+
+export function topologySvgDimensions(cy: Core): { width: number; height: number; offsetX: number; offsetY: number } {
   const bounds = cy.elements().boundingBox();
-  const width = Math.max(320, Math.ceil(bounds.w + 120));
-  const height = Math.max(240, Math.ceil(bounds.h + 120));
-  const offsetX = 60 - bounds.x1;
-  const offsetY = 60 - bounds.y1;
+  return {
+    width: Math.max(320, Math.ceil(bounds.w + 120)),
+    height: Math.max(240, Math.ceil(bounds.h + 140)),
+    offsetX: 60 - bounds.x1,
+    offsetY: 80 - bounds.y1,
+  };
+}
+
+export function buildTopologySvg(cy: Core, isDark = false, skipText = false) {
+  const { width, height, offsetX, offsetY } = topologySvgDimensions(cy);
+
+  const bg         = isDark ? "#0c1118" : "#fbfdfe";
+  const zoneFill   = isDark ? "#111c28" : "#f4f8fa";
+  const zoneBorder = isDark ? "#2d3d52" : "#aebfcb";
+  const zoneTxt    = isDark ? "#8ab0c8" : "#263b4b";
+  const edgeColor  = isDark ? "#2d4a60" : "#6f8798";
 
   let zoneMarkup = "";
   cy.nodes(".zone").forEach((zone) => {
     const position = zone.position();
     const zoneWidth = zone.width();
     const zoneHeight = zone.height();
+    const top  = position.y - zoneHeight / 2 + offsetY;
+    const left = position.x - zoneWidth / 2 + offsetX;
+    const labelText = skipText ? "" : `<text x="${left + 14}" y="${top - 6}" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="${zoneTxt}">${escapeXml(String(zone.data("label") ?? ""))}</text>`;
     zoneMarkup += `
         <g>
-          <rect x="${position.x - zoneWidth / 2 + offsetX}" y="${position.y - zoneHeight / 2 + offsetY}" width="${zoneWidth}" height="${zoneHeight}" rx="20" ry="20" fill="#f4f8fa" stroke="#aebfcb" stroke-width="2" stroke-dasharray="8 6" />
-          <text x="${position.x - zoneWidth / 2 + 18 + offsetX}" y="${position.y - zoneHeight / 2 + 26 + offsetY}" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#263b4b">${escapeXml(zone.data("label") ?? "")}</text>
+          <rect x="${left}" y="${top}" width="${zoneWidth}" height="${zoneHeight}" rx="20" ry="20" fill="${zoneFill}" stroke="${zoneBorder}" stroke-width="2" stroke-dasharray="8 6" />
+          ${labelText}
         </g>
       `;
   });
 
+  const edgeTxtColor = isDark ? "#c8dae8" : "#2a4055";
+  const edgeBgColor  = isDark ? "#1d2f40" : "#eef3f7";
+
   let edgeMarkup = "";
   cy.edges().forEach((edge) => {
-    const source = edge.source().position();
-    const target = edge.target().position();
-    edgeMarkup += `<line x1="${source.x + offsetX}" y1="${source.y + offsetY}" x2="${target.x + offsetX}" y2="${target.y + offsetY}" stroke="#6f8798" stroke-width="2" />`;
+    const ep = edgeClippedEndpoints(edge, offsetX, offsetY);
+    if (!ep) return;
+    const { sx, sy, tx, ty } = ep;
+    edgeMarkup += `<line x1="${sx}" y1="${sy}" x2="${tx}" y2="${ty}" stroke="${edgeColor}" stroke-width="2" />`;
+    if (!skipText) {
+      const label = String(edge.data("label") ?? "");
+      if (label) {
+        const mx = (sx + tx) / 2;
+        const my = (sy + ty) / 2;
+        const approxW = label.length * 7 + 8;
+        edgeMarkup += `<rect x="${mx - approxW / 2}" y="${my - 10}" width="${approxW}" height="18" rx="4" fill="${edgeBgColor}" />`;
+        edgeMarkup += `<text x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="12" fill="${edgeTxtColor}">${escapeXml(label)}</text>`;
+      }
+    }
   });
 
   let nodeMarkup = "";
   cy.nodes(".device").forEach((node) => {
     const position = node.position();
-    const label = String(node.data("label") ?? "");
-    const lines = label.split("\n");
     const color = String(node.data("color") ?? "#5b7c91");
     const icon = resolveDeviceIcon(String(node.data("icon") ?? "unknown"));
     const iconSvgPath = deviceIconPath(icon);
     const nodeScale = Math.max(0.7, Math.min(2.2, Number(node.data("nodeScale") ?? 1)));
     const size = Math.max(30, Math.min(130, 44 * nodeScale));
     const scale = size / 24;
+    let labelMarkup = "";
+    if (!skipText) {
+      const label = String(node.data("label") ?? "");
+      const labelColor = isDark ? "#d7e2ea" : "#13212b";
+      const labelY = position.y + offsetY + size / 2 + 14;
+      labelMarkup = label.split("\n").map((line, index) =>
+        `<text x="${position.x + offsetX}" y="${labelY + index * 14}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="600" fill="${labelColor}">${escapeXml(line)}</text>`
+      ).join("");
+    }
     nodeMarkup += `
         <g>
-          <g transform="translate(${position.x + offsetX - 12 * scale} ${position.y + offsetY - 12 * scale}) scale(${scale})">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${escapeXml(color)}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              ${iconSvgPath}
-            </svg>
+          <g transform="translate(${position.x + offsetX - 12 * scale} ${position.y + offsetY - 12 * scale}) scale(${scale})" fill="none" stroke="${escapeXml(color)}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            ${iconSvgPath}
           </g>
-          ${lines
-            .map(
-              (line, index) =>
-                `<text x="${position.x + offsetX}" y="${position.y + 44 + offsetY + index * 14}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#13212b">${escapeXml(line)}</text>`,
-            )
-            .join("")}
+          ${labelMarkup}
         </g>
       `;
   });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect width="100%" height="100%" fill="#fbfdfe" />
+  <rect width="100%" height="100%" fill="${bg}" />
   ${zoneMarkup}
   ${edgeMarkup}
   ${nodeMarkup}
