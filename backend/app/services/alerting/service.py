@@ -77,7 +77,7 @@ class AlertMonitorService:
         return True
 
     def _run(self) -> None:
-        if self._stop.wait(30):
+        if self._stop.wait(5):
             return
         while True:
             try:
@@ -235,7 +235,7 @@ class AlertMonitorService:
 
     def _probe_device_status(self, device: Device) -> tuple[str, float | None]:
         try:
-            result = ping_host(PingRequest(host=device.ip_address, count=2, timeout_seconds=2))
+            result = ping_host(PingRequest(host=device.ip_address, count=1, timeout_seconds=1))
             if result.received > 0:
                 return "online", result.average_ms
             return "offline", None

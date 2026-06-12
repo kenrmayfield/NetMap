@@ -107,13 +107,14 @@ export function MonitoringWorkspace({
   const [portError, setPortError] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [sortKey, setSortKey] = useState<"name" | "uptime24" | "uptime7" | "rtt" | "checked">("name");
+  const [sortKey, setSortKey] = useState<"status" | "name" | "uptime24" | "uptime7" | "rtt" | "checked">("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [deviceAlertEvents, setDeviceAlertEvents] = useState<AlertEvent[]>([]);
   const [allAlertRules, setAllAlertRules] = useState<AlertRule[]>([]);
   const [analysis, setAnalysis] = useState<DeviceAnalysis | null>(null);
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterSite, setFilterSite] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
 
   const loadAll = useCallback(async (showSpinner = false) => {
     if (showSpinner) setRefreshing(true);
@@ -254,10 +255,15 @@ export function MonitoringWorkspace({
 
     if (filterGroup !== "all") filtered = filtered.filter((d) => d.topology_group === filterGroup);
     if (filterSite !== "all") filtered = filtered.filter((d) => String(d.site_id) === filterSite);
+    if (filterStatus !== "all") filtered = filtered.filter((d) => d.status === filterStatus);
 
     const dir = sortDir === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
       switch (sortKey) {
+        case "status": {
+          const order: Record<string, number> = { online: 0, warning: 1, unknown: 2, offline: 3 };
+          return ((order[a.status] ?? 4) - (order[b.status] ?? 4)) * dir;
+        }
         case "name": {
           const na = (a.display_name ?? a.hostname ?? a.ip_address).toLowerCase();
           const nb = (b.display_name ?? b.hostname ?? b.ip_address).toLowerCase();
@@ -278,7 +284,7 @@ export function MonitoringWorkspace({
       }
     });
     return filtered;
-  }, [devices, searchQ, filterGroup, filterSite, sortKey, sortDir]);
+  }, [devices, searchQ, filterGroup, filterSite, filterStatus, sortKey, sortDir]);
 
   function toggleSort(key: typeof sortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -414,6 +420,13 @@ export function MonitoringWorkspace({
                 : ` (${devices.length})`}
             </span>
             <div className="mon-panel-controls">
+              <select className="toolbar-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                <option value="all">All statuses</option>
+                <option value="online">Online</option>
+                <option value="offline">Offline</option>
+                <option value="warning">Warning</option>
+                <option value="unknown">Unknown</option>
+              </select>
               {groupOptions.length > 0 && (
                 <select className="toolbar-select" value={filterGroup} onChange={(e) => setFilterGroup(e.target.value)}>
                   <option value="all">All groups</option>
@@ -454,7 +467,7 @@ export function MonitoringWorkspace({
                 style={{ tableLayout: "fixed" }}
               >
                 <colgroup>
-                  <col style={{ width: 28 }} />
+                  <col style={{ width: 40 }} />
                   {colWidths
                     ? colWidths.map((w, i) => <col key={i} style={{ width: w }} />)
                     : <>
@@ -467,7 +480,11 @@ export function MonitoringWorkspace({
                 </colgroup>
                 <thead>
                   <tr>
-                    <th style={{ width: 28 }} />
+                    <th style={{ width: 40 }}>
+                      <button type="button" className={`inventory-sort-btn${sortKey === "status" ? " active" : ""}`} onClick={() => toggleSort("status")} title="Sort by status">
+                        {sortKey === "status" && (sortDir === "asc" ? <ChevronUp size={10} /> : <ChevronDown size={10} />)}
+                      </button>
+                    </th>
                     <th>
                       <button type="button" className={`inventory-sort-btn${sortKey === "name" ? " active" : ""}`} onClick={() => toggleSort("name")}>
                         Device{sortKey === "name" && (sortDir === "asc" ? <ChevronUp size={10} /> : <ChevronDown size={10} />)}

@@ -63,6 +63,80 @@ def test_firewall_event_search_uses_fts_for_raw_log_matches():
         assert db.scalar(count_query) == 1
 
 
+def test_firewall_event_search_matches_raw_log_prefix_terms():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    FirewallBase.metadata.create_all(bind=engine, tables=[FirewallEvent.__table__])
+    with engine.begin() as conn:
+        setup_firewall_fts(conn)
+
+    with Session(engine) as db:
+        db.add_all(
+            [
+                FirewallEvent(
+                    raw_log="banIP/inp-wan/drp/firehol1v4: SRC=66.132.172.154 DPT=55720",
+                    action="drop",
+                    rule_id="firehol1v4",
+                    reason="banIP inp-wan",
+                ),
+                FirewallEvent(
+                    raw_log="banIP/inp-lan/drp/testing3221: SRC=192.0.2.44 DPT=443",
+                    action="drop",
+                    rule_id="testing3221",
+                    reason="banIP inp-lan",
+                ),
+            ]
+        )
+        db.commit()
+
+        partial_feed_query = apply_event_filters(
+            select(FirewallEvent),
+            q="fire",
+            src_ip=None,
+            dst_ip=None,
+            src_port=None,
+            dst_port=None,
+            action=None,
+            protocol=None,
+            interface=None,
+            start_time=None,
+            end_time=None,
+        )
+        multi_term_query = apply_event_filters(
+            select(FirewallEvent),
+            q="inp wan",
+            src_ip=None,
+            dst_ip=None,
+            src_port=None,
+            dst_port=None,
+            action=None,
+            protocol=None,
+            interface=None,
+            start_time=None,
+            end_time=None,
+        )
+        custom_feed_query = apply_event_filters(
+            select(FirewallEvent),
+            q="testing3221",
+            src_ip=None,
+            dst_ip=None,
+            src_port=None,
+            dst_port=None,
+            action=None,
+            protocol=None,
+            interface=None,
+            start_time=None,
+            end_time=None,
+        )
+
+        assert [event.rule_id for event in db.scalars(partial_feed_query).all()] == ["firehol1v4"]
+        assert [event.rule_id for event in db.scalars(multi_term_query).all()] == ["firehol1v4"]
+        assert [event.rule_id for event in db.scalars(custom_feed_query).all()] == ["testing3221"]
+
+
 def test_firewall_fts_setup_recovers_from_malformed_index():
     engine = create_engine(
         "sqlite://",

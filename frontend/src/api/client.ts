@@ -177,6 +177,7 @@ export type DiscoveryHost = {
 
 export type DiscoveryScan = {
   id: number;
+  schedule_id: number | null;
   target: string;
   scan_type: string;
   status: string;
@@ -192,6 +193,61 @@ export type DiscoveryImportResult = {
   created: number;
   updated: number;
   skipped_existing: number;
+};
+
+export type DiscoverySchedule = {
+  id: number;
+  owner_user_id: number;
+  name: string;
+  target: string;
+  scan_type: DiscoveryScanType;
+  enabled: boolean;
+  interval_minutes: number;
+  confirm_large_scan: boolean;
+  topology_group_id: number | null;
+  site_id: number | null;
+  snmp_profile_id: number | null;
+  snmp_targets: string[];
+  notification_targets: string[];
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_scan_id: number | null;
+  last_status: string | null;
+  last_error: string | null;
+  open_observation_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscoveryObservation = {
+  id: number;
+  schedule_id: number;
+  scan_id: number | null;
+  device_id: number | null;
+  observation_type: "new_device" | "ip_change" | "field_change" | "disappeared" | string;
+  status: "open" | "acknowledged" | "resolved";
+  ip_address: string | null;
+  mac_address: string | null;
+  hostname: string | null;
+  summary: string;
+  details: Record<string, unknown>;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+};
+
+export type DiscoverySchedulePayload = {
+  name: string;
+  target: string;
+  scan_type: DiscoveryScanType;
+  enabled: boolean;
+  interval_minutes: number;
+  confirm_large_scan: boolean;
+  topology_group_id?: number | null;
+  site_id?: number | null;
+  snmp_profile_id?: number | null;
+  snmp_targets?: string[];
+  notification_targets?: string[];
 };
 
 export type SnmpInterfaceResult = {
@@ -226,6 +282,29 @@ export type SnmpProfile = {
   retries: number;
   created_at: string;
   updated_at: string;
+};
+
+export type LldpNeighbour = {
+  id: number;
+  source_device_id: number;
+  local_port_index: number;
+  local_port_id: string | null;
+  local_port_desc: string | null;
+  remote_chassis_id: string;
+  remote_port_id: string | null;
+  remote_port_desc: string | null;
+  remote_sys_name: string | null;
+  remote_mgmt_addr: string | null;
+  matched_device_id: number | null;
+  dismissed: boolean;
+  last_seen: string;
+  created_at: string;
+};
+
+export type LldpScanResult = {
+  source_device_id: number;
+  neighbours: LldpNeighbour[];
+  error: string | null;
 };
 
 export type SnmpEnrichmentChange = {
@@ -1086,6 +1165,42 @@ export const api = {
         update_ip_on_mac_match: updateIpOnMacMatch ?? false,
       }),
     }),
+  listDiscoverySchedules: (token: string) =>
+    request<DiscoverySchedule[]>("/api/v1/discovery/schedules", { token }),
+  createDiscoverySchedule: (token: string, payload: DiscoverySchedulePayload) =>
+    request<DiscoverySchedule>("/api/v1/discovery/schedules", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload),
+    }),
+  updateDiscoverySchedule: (token: string, id: number, payload: Partial<DiscoverySchedulePayload>) =>
+    request<DiscoverySchedule>(`/api/v1/discovery/schedules/${id}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(payload),
+    }),
+  deleteDiscoverySchedule: (token: string, id: number) =>
+    request<void>(`/api/v1/discovery/schedules/${id}`, { method: "DELETE", token }),
+  runDiscoverySchedule: (token: string, id: number) =>
+    request<DiscoveryScan>(`/api/v1/discovery/schedules/${id}/run`, { method: "POST", token }),
+  listDiscoveryObservations: (
+    token: string,
+    params: { schedule_id?: number; status_filter?: "open" | "acknowledged" | "resolved" | "all" } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.schedule_id !== undefined) search.set("schedule_id", String(params.schedule_id));
+    if (params.status_filter) search.set("status_filter", params.status_filter);
+    const query = search.toString();
+    return request<DiscoveryObservation[]>(`/api/v1/discovery/observations${query ? `?${query}` : ""}`, { token });
+  },
+  updateDiscoveryObservation: (token: string, id: number, status: "open" | "acknowledged" | "resolved") =>
+    request<DiscoveryObservation>(`/api/v1/discovery/observations/${id}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({ status }),
+    }),
+  applyObservation: (token: string, id: number) =>
+    request<DiscoveryObservation>(`/api/v1/discovery/observations/${id}/apply`, { method: "POST", token }),
   syslogStatus: (token: string) => request<SyslogStatus>("/api/v1/syslog/status", { token }),
   firewallEvents: (token: string, params: FirewallEventSearchParams = {}) => {
     const search = new URLSearchParams();
@@ -1384,4 +1499,24 @@ export const api = {
     request<void>(`/api/v1/ipam/reservations/${id}`, { method: "DELETE", token }),
   getVersion: (token: string) => request<VersionInfo>("/api/v1/system/version", { token }),
   getSystemDiagnostics: (token: string) => request<SystemDiagnostics>("/api/v1/system/diagnostics", { token }),
+  lldpScan: (token: string, deviceId: number) =>
+    request<LldpScanResult>(`/api/v1/lldp/scan/${deviceId}`, { method: "POST", token }),
+  listLldpNeighbours: (token: string, params?: { source_device_id?: number; dismissed?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (params?.source_device_id !== undefined) qs.set("source_device_id", String(params.source_device_id));
+    if (params?.dismissed !== undefined) qs.set("dismissed", String(params.dismissed));
+    const q = qs.toString();
+    return request<LldpNeighbour[]>(`/api/v1/lldp/neighbours${q ? `?${q}` : ""}`, { token });
+  },
+  patchLldpNeighbour: (token: string, id: number, payload: { dismissed?: boolean; matched_device_id?: number }) =>
+    request<LldpNeighbour>(`/api/v1/lldp/neighbours/${id}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(payload),
+    }),
+  lldpCreateLink: (token: string, neighbourId: number) =>
+    request<{ relationship_id: number; created: boolean }>(`/api/v1/lldp/neighbours/${neighbourId}/create-link`, {
+      method: "POST",
+      token,
+    }),
 };

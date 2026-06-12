@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Moon, Network, Sun } from "lucide-react";
 import {
-  type DashboardSummary, type Device, type SystemSettings, type TokenPair,
+  type DashboardSummary, type Device, type DeviceMonitorSummary, type DeviceStatus, type SystemSettings, type TokenPair,
   type TopologyGraph, type User, type VersionInfo, api,
 } from "./api/client";
 import { themeStorageKey, iconPackStorageKey } from "./constants";
@@ -45,6 +45,8 @@ export function App() {
   const [iconPackError, setIconPackError] = useState<string | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const topologyRefreshRequestIdRef = useRef(0);
+  const monitorCursorRef = useRef<string | null>(null);
+  const monitorPollCountRef = useRef(0);
   const [resetToken, setResetToken] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("reset_token");
@@ -55,6 +57,7 @@ export function App() {
     user?.role === "SuperAdmin" || user?.role === "NetworkAdmin" || user?.role === "SecurityAnalyst";
   const canAccessExports = user?.role !== "Viewer";
   const canAccessAdmin = user?.role === "SuperAdmin";
+  const [openObservationCount, setOpenObservationCount] = useState(0);
 
   useEffect(() => {
     void api.adminPublicSettings().then(setAppSettings).catch(() => {});
@@ -69,6 +72,22 @@ export function App() {
     if (!accessToken) return;
     void api.adminPublicSettings().then(setAppSettings).catch(() => {});
   }, [accessToken]);
+
+  const refreshObservationCount = useMemo(() => {
+    if (!accessToken || !canAccessAdmin) return undefined;
+    return () => {
+      void api.listDiscoveryObservations(accessToken, { status_filter: "open" })
+        .then((obs) => setOpenObservationCount(obs.length))
+        .catch(() => {});
+    };
+  }, [accessToken, canAccessAdmin]);
+
+  useEffect(() => {
+    if (!refreshObservationCount) return;
+    refreshObservationCount();
+    const id = window.setInterval(refreshObservationCount, 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [refreshObservationCount]);
 
   useEffect(() => {
     const syncRoute = () => setCurrentRoute(readRouteFromLocation());
@@ -283,6 +302,73 @@ export function App() {
   }, [screen, tokens?.access_token]);
 
   useEffect(() => {
+    if (screen !== "dashboard" || !accessToken || appSettings?.live_ping_enabled === false) {
+      monitorCursorRef.current = null;
+      monitorPollCountRef.current = 0;
+      return;
+    }
+
+    const validStatuses = new Set<DeviceStatus>(["online", "offline", "warning", "unknown", "disabled"]);
+    const boundedMonitorIntervalSeconds = Math.min(3600, Math.max(30, appSettings?.monitor_interval_seconds ?? 300));
+    const pollMs = Math.min(60_000, Math.max(30_000, boundedMonitorIntervalSeconds * 1000));
+    const fullRefreshPolls = Math.max(1, Math.ceil(300_000 / pollMs));
+    let cancelled = false;
+    const token = accessToken;
+
+    function applyMonitorRows(rows: DeviceMonitorSummary[]) {
+      if (rows.length === 0) return;
+      const byId = new Map(rows.map((row) => [row.device_id, row]));
+      setGraph((current) => {
+        let changed = false;
+        const devices = current.devices.map((device) => {
+          const row = byId.get(device.id);
+          if (!row || !validStatuses.has(row.status as DeviceStatus)) {
+            return device;
+          }
+          const nextStatus = row.status as DeviceStatus;
+          const nextCheckedAt = row.last_checked ?? device.last_monitored_at;
+          if (device.monitor_status === nextStatus && device.last_monitored_at === nextCheckedAt) {
+            return device;
+          }
+          changed = true;
+          return {
+            ...device,
+            monitor_status: nextStatus,
+            last_monitored_at: nextCheckedAt,
+          };
+        });
+        return changed ? { ...current, devices } : current;
+      });
+    }
+
+    async function pollMonitoring(forceFull = false) {
+      try {
+        const previousCursor = monitorCursorRef.current;
+        const shouldFullRefresh = forceFull || !previousCursor || monitorPollCountRef.current >= fullRefreshPolls;
+        const [fleet, rows] = await Promise.all([
+          api.getMonitoringSummary(token),
+          api.listMonitoringDevices(token, shouldFullRefresh ? undefined : previousCursor),
+        ]);
+        if (cancelled) return;
+        applyMonitorRows(rows);
+        monitorCursorRef.current = fleet.last_checked ?? previousCursor;
+        monitorPollCountRef.current = shouldFullRefresh ? 1 : monitorPollCountRef.current + 1;
+      } catch {
+        // Keep the current graph state; the next poll or route refresh will reconcile.
+      }
+    }
+
+    void pollMonitoring(true);
+    const intervalId = window.setInterval(() => {
+      void pollMonitoring(false);
+    }, pollMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [accessToken, appSettings?.live_ping_enabled, appSettings?.monitor_interval_seconds, screen]);
+
+  useEffect(() => {
     if (screen !== "dashboard" || !tokens?.access_token) {
       return;
     }
@@ -433,6 +519,7 @@ export function App() {
             return next;
           });
         }}
+        openObservationCount={openObservationCount}
         theme={theme}
         onNavigate={(route) => {
           if (route === currentRoute) {
@@ -468,6 +555,8 @@ export function App() {
             }}
             onSettingsChange={setAppSettings}
             onUserUpdate={setUser}
+            onObservationActioned={refreshObservationCount}
+            openObservationCount={openObservationCount}
             theme={theme}
             summary={summary}
             user={user}

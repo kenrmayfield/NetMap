@@ -122,6 +122,8 @@ def apply_sqlite_schema_updates() -> None:
         _run_migration(conn, inspector, "0030_snmp_profiles", _migrate_snmp_profiles)
         _run_migration(conn, inspector, "0031_service_check_fields", _migrate_service_check_fields)
         _run_migration(conn, inspector, "0032_notification_profiles", _migrate_notification_profiles)
+        _run_migration(conn, inspector, "0033_scheduled_discovery", _migrate_scheduled_discovery)
+        _run_migration(conn, inspector, "0034_lldp_neighbours", _migrate_lldp_neighbours)
 
 
 def _run_migration(conn, inspector, name: str, fn) -> None:
@@ -369,6 +371,77 @@ def _migrate_notification_profiles(conn, inspector) -> None:
         )
     )
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notification_profiles_id ON notification_profiles (id)"))
+
+
+def _migrate_scheduled_discovery(conn, inspector) -> None:
+    tables = set(inspector.get_table_names())
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS discovery_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_user_id INTEGER NOT NULL REFERENCES users(id),
+                name VARCHAR(120) NOT NULL,
+                target VARCHAR(255) NOT NULL,
+                scan_type VARCHAR(40) NOT NULL DEFAULT 'ping',
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                interval_minutes INTEGER NOT NULL DEFAULT 1440,
+                confirm_large_scan BOOLEAN NOT NULL DEFAULT 0,
+                topology_group_id INTEGER REFERENCES topology_groups(id) ON DELETE SET NULL,
+                site_id INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+                snmp_profile_id INTEGER REFERENCES snmp_profiles(id) ON DELETE SET NULL,
+                snmp_targets_json TEXT NOT NULL DEFAULT '[]',
+                notification_targets_json TEXT NOT NULL DEFAULT '[]',
+                last_run_at DATETIME,
+                next_run_at DATETIME,
+                last_scan_id INTEGER REFERENCES discovery_scans(id) ON DELETE SET NULL,
+                last_status VARCHAR(40),
+                last_error TEXT,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_schedules_id ON discovery_schedules (id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_schedules_owner_user_id ON discovery_schedules (owner_user_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_schedules_next_run_at ON discovery_schedules (next_run_at)"))
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS discovery_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL REFERENCES discovery_schedules(id) ON DELETE CASCADE,
+                scan_id INTEGER REFERENCES discovery_scans(id) ON DELETE SET NULL,
+                device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+                observation_type VARCHAR(40) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                ip_address VARCHAR(64),
+                mac_address VARCHAR(64),
+                hostname VARCHAR(255),
+                summary VARCHAR(255) NOT NULL,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                first_seen_at DATETIME NOT NULL,
+                last_seen_at DATETIME NOT NULL,
+                resolved_at DATETIME
+            )
+            """
+        )
+    )
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_id ON discovery_observations (id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_schedule_id ON discovery_observations (schedule_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_scan_id ON discovery_observations (scan_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_device_id ON discovery_observations (device_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_status ON discovery_observations (status)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_type ON discovery_observations (observation_type)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_last_seen_at ON discovery_observations (last_seen_at)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_ip ON discovery_observations (ip_address)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_observations_mac ON discovery_observations (mac_address)"))
+    if "discovery_scans" in tables:
+        existing = {col["name"] for col in inspector.get_columns("discovery_scans")}
+        if "schedule_id" not in existing:
+            conn.execute(text("ALTER TABLE discovery_scans ADD COLUMN schedule_id INTEGER REFERENCES discovery_schedules(id) ON DELETE SET NULL"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_discovery_scans_schedule_id ON discovery_scans (schedule_id)"))
 
 
 def _migrate_monitor_history(conn, inspector) -> None:
@@ -719,3 +792,31 @@ def _migrate_snmp_profiles(conn, inspector) -> None:
     if "snmp_profile_id" not in existing:
         conn.execute(text("ALTER TABLE devices ADD COLUMN snmp_profile_id INTEGER REFERENCES snmp_profiles(id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_devices_snmp_profile_id ON devices (snmp_profile_id)"))
+
+
+def _migrate_lldp_neighbours(conn, inspector) -> None:
+    tables = set(inspector.get_table_names())
+    if "lldp_neighbours" not in tables:
+        conn.execute(text(
+            """
+            CREATE TABLE lldp_neighbours (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                local_port_index INTEGER NOT NULL,
+                local_port_id VARCHAR(255),
+                local_port_desc VARCHAR(255),
+                remote_chassis_id VARCHAR(64) NOT NULL,
+                remote_port_id VARCHAR(255),
+                remote_port_desc VARCHAR(255),
+                remote_sys_name VARCHAR(255),
+                remote_mgmt_addr VARCHAR(64),
+                matched_device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+                dismissed BOOLEAN NOT NULL DEFAULT 0,
+                last_seen DATETIME NOT NULL,
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_lldp_neighbour UNIQUE (source_device_id, local_port_index, remote_chassis_id)
+            )
+            """
+        ))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lldp_neighbours_id ON lldp_neighbours (id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lldp_neighbours_source_device_id ON lldp_neighbours (source_device_id)"))

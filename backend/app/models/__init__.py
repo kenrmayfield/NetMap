@@ -4,7 +4,8 @@ from app.models.alert_event import AlertEvent
 from app.models.audit_log import AuditLog
 from app.models.auth_session import LoginThrottleState, RefreshTokenState
 from app.models.device import Device, DeviceStatus
-from app.models.discovery import DiscoveryScan
+from app.models.discovery import DiscoveryObservation, DiscoveryScan, DiscoverySchedule
+from app.models.lldp import LldpNeighbour
 from app.models.firewall_event import FirewallEvent
 from app.models.ip_reservation import IpReservation
 from app.models.notification_profile import NotificationProfile
@@ -26,7 +27,10 @@ __all__ = [
     "Device",
     "DeviceRelationship",
     "DeviceStatus",
+    "DiscoveryObservation",
     "DiscoveryScan",
+    "DiscoverySchedule",
+    "LldpNeighbour",
     "FirewallEvent",
     "SnmpProfile",
     "TopologyLayout",

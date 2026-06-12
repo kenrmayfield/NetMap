@@ -175,6 +175,22 @@ export type TopologyDisplayPrefsLocal = {
   nodeLabelFontSize?: number;
 };
 
+export const MAX_GROUP_ZONE_OPACITY_PERCENT = 10;
+export const MAX_GROUP_ZONE_OPACITY_SLIDER_PERCENT = 100;
+
+export function clampGroupZoneOpacityPercent(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(MAX_GROUP_ZONE_OPACITY_PERCENT, value));
+}
+
+export function groupZoneOpacityToSliderPercent(value: number): number {
+  return Math.round((value / MAX_GROUP_ZONE_OPACITY_PERCENT) * MAX_GROUP_ZONE_OPACITY_SLIDER_PERCENT);
+}
+
+export function groupZoneOpacityFromSliderPercent(value: number): number {
+  return clampGroupZoneOpacityPercent((value / MAX_GROUP_ZONE_OPACITY_SLIDER_PERCENT) * MAX_GROUP_ZONE_OPACITY_PERCENT) ?? 0;
+}
+
 export function readTopologyDisplayPrefs(userId: number): TopologyDisplayPrefsLocal {
   const raw = window.localStorage.getItem(topologyDisplayPrefsKey(userId));
   if (!raw) return { groups: {} };
@@ -182,7 +198,7 @@ export function readTopologyDisplayPrefs(userId: number): TopologyDisplayPrefsLo
     const parsed = JSON.parse(raw) as TopologyDisplayPrefsLocal;
     return {
       groups: parsed.groups ?? {},
-      groupZoneOpacityPercent: parsed.groupZoneOpacityPercent,
+      groupZoneOpacityPercent: clampGroupZoneOpacityPercent(parsed.groupZoneOpacityPercent),
       showGroupZoneBorders: parsed.showGroupZoneBorders,
       showNodeIcons: parsed.showNodeIcons,
       showNodeLabels: parsed.showNodeLabels,

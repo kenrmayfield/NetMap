@@ -49,6 +49,7 @@ class IngestionStatus:
 
 _retention_status = RetentionStatus()
 _retention_status_lock = threading.Lock()
+_retention_cleanup_lock = threading.Lock()
 _ingestion_status = IngestionStatus()
 _ingestion_status_lock = threading.Lock()
 
@@ -94,42 +95,60 @@ def event_from_parsed(parsed: ParsedFirewallEvent) -> FirewallEvent:
 
 
 def cleanup_expired_events() -> int:
+    if not _retention_cleanup_lock.acquire(blocking=False):
+        logger.debug("Skipping firewall retention cleanup because another cleanup is already running")
+        return 0
     retention_days = max(1, settings.firewall_log_retention_days)
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     started_at = datetime.now(timezone.utc)
     try:
-        with SessionLocal() as db:
-            result = db.execute(delete(FirewallEvent).where(FirewallEvent.received_at < cutoff))
-            db.commit()
-        deleted = int(result.rowcount or 0)
-    except DatabaseError as exc:
-        if is_corrupt_firewall_db_error(exc):
-            logger.warning(
-                "firewall.db is corrupt during retention cleanup; deleting and recreating "
-                "(syslog history lost)",
-                exc_info=True,
-            )
-            reset_firewall_db_after_corruption()
-            update_retention_status(
-                started_at,
-                0,
-                "firewall.db was corrupt during retention cleanup and was recreated; syslog history was lost",
-            )
+        try:
+            with SessionLocal() as db:
+                result = db.execute(delete(FirewallEvent).where(FirewallEvent.received_at < cutoff))
+                db.commit()
+            deleted = int(result.rowcount or 0)
+        except DatabaseError as exc:
+            if is_corrupt_firewall_db_error(exc):
+                logger.warning(
+                    "firewall.db is corrupt during retention cleanup; deleting and recreating "
+                    "(syslog history lost)",
+                    exc_info=True,
+                )
+                reset_firewall_db_after_corruption()
+                update_retention_status(
+                    started_at,
+                    0,
+                    "firewall.db was corrupt during retention cleanup and was recreated; syslog history was lost",
+                )
+                with _retention_status_lock:
+                    _retention_status.event_count = 0
+                return 0
+            if is_locked_firewall_db_error(exc):
+                logger.warning("firewall.db was locked during retention cleanup; cleanup will retry later")
+                update_retention_status(
+                    started_at,
+                    0,
+                    "firewall.db was locked during retention cleanup; cleanup will retry later",
+                )
+                return 0
+            update_retention_status(started_at, 0, str(exc))
+            raise
+        except Exception as exc:
+            update_retention_status(started_at, 0, str(exc))
+            raise
+        update_retention_status(started_at, deleted, None)
+        if deleted:
+            logger.info("Deleted %s firewall events older than %s days", deleted, retention_days)
             with _retention_status_lock:
-                _retention_status.event_count = 0
-            return 0
-        update_retention_status(started_at, 0, str(exc))
-        raise
-    except Exception as exc:
-        update_retention_status(started_at, 0, str(exc))
-        raise
-    update_retention_status(started_at, deleted, None)
-    if deleted:
-        logger.info("Deleted %s firewall events older than %s days", deleted, retention_days)
-        with _retention_status_lock:
-            if _retention_status.event_count is not None:
-                _retention_status.event_count = max(0, _retention_status.event_count - deleted)
-    return deleted
+                if _retention_status.event_count is not None:
+                    _retention_status.event_count = max(0, _retention_status.event_count - deleted)
+        return deleted
+    finally:
+        _retention_cleanup_lock.release()
+
+
+def is_locked_firewall_db_error(exc: BaseException) -> bool:
+    return "database is locked" in str(exc).lower()
 
 
 def count_events() -> int:

@@ -1,4 +1,7 @@
+import sqlite3
+
 from sqlalchemy import create_engine
+from sqlalchemy.exc import DatabaseError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -77,3 +80,76 @@ def test_syslog_ingestion_counters_track_stored_and_unparsed(monkeypatch):
     assert status.stored_events == 1
     assert status.dropped_unparsed == 1
     assert status.last_drop_raw == "OpenWrt logread started"
+
+
+def test_retention_cleanup_recovers_malformed_firewall_db(monkeypatch):
+    recovered = {"called": False}
+
+    class BrokenSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def execute(self, _statement):
+            raise DatabaseError(
+                "DELETE FROM firewall_events WHERE firewall_events.received_at < ?",
+                {},
+                sqlite3.DatabaseError("database disk image is malformed"),
+            )
+
+    monkeypatch.setattr(storage, "SessionLocal", lambda: BrokenSession())
+    monkeypatch.setattr(storage, "reset_firewall_db_after_corruption", lambda: recovered.update(called=True))
+    monkeypatch.setattr(storage, "_retention_status", storage.RetentionStatus(event_count=42))
+
+    deleted = storage.cleanup_expired_events()
+    status = storage.get_retention_status()
+
+    assert deleted == 0
+    assert recovered["called"] is True
+    assert status.last_deleted == 0
+    assert status.last_error == "firewall.db was corrupt during retention cleanup and was recreated; syslog history was lost"
+    assert storage.count_events() == 0
+
+
+def test_retention_cleanup_defers_locked_firewall_db(monkeypatch):
+    class LockedSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def execute(self, _statement):
+            raise OperationalError(
+                "DELETE FROM firewall_events WHERE firewall_events.received_at < ?",
+                {},
+                sqlite3.OperationalError("database is locked"),
+            )
+
+    monkeypatch.setattr(storage, "SessionLocal", lambda: LockedSession())
+    monkeypatch.setattr(storage, "_retention_status", storage.RetentionStatus(event_count=42))
+
+    deleted = storage.cleanup_expired_events()
+    status = storage.get_retention_status()
+
+    assert deleted == 0
+    assert status.last_deleted == 0
+    assert status.last_error == "firewall.db was locked during retention cleanup; cleanup will retry later"
+    assert storage.count_events() == 42
+
+
+def test_retention_cleanup_skips_when_cleanup_already_running(monkeypatch):
+    assert storage._retention_cleanup_lock.acquire(blocking=False) is True
+    try:
+        monkeypatch.setattr(storage, "_retention_status", storage.RetentionStatus(event_count=42))
+
+        deleted = storage.cleanup_expired_events()
+        status = storage.get_retention_status()
+
+        assert deleted == 0
+        assert status.last_run_at is None
+        assert storage.count_events() == 42
+    finally:
+        storage._retention_cleanup_lock.release()

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -223,6 +224,55 @@ def test_alert_monitor_reads_interval_and_live_ping_settings(monkeypatch):
 
     assert monitor._get_interval() == 3600
     assert monitor._live_ping_enabled() is True
+
+
+def test_alert_monitor_tcp_fallback_marks_device_online_when_icmp_unavailable(monkeypatch):
+    device = Device(
+        id=1,
+        display_name="Router",
+        ip_address="10.0.0.1",
+        status="online",
+    )
+    monitor = alerting_service.AlertMonitorService()
+
+    def fail_ping(*_args, **_kwargs):
+        raise RuntimeError("icmp unavailable")
+
+    @contextmanager
+    def fake_connection(*_args, **_kwargs):
+        yield object()
+
+    monkeypatch.setattr(alerting_service, "ping_host", fail_ping)
+    monkeypatch.setattr(alerting_service.socket, "create_connection", fake_connection)
+
+    status, rtt_ms = monitor._probe_device_status(device)
+
+    assert status == "online"
+    assert rtt_ms is not None
+
+
+def test_alert_monitor_tcp_fallback_marks_device_offline_when_all_probes_fail(monkeypatch):
+    device = Device(
+        id=1,
+        display_name="Router",
+        ip_address="10.0.0.1",
+        status="online",
+    )
+    monitor = alerting_service.AlertMonitorService()
+
+    def fail_ping(*_args, **_kwargs):
+        raise RuntimeError("icmp unavailable")
+
+    def fail_connection(*_args, **_kwargs):
+        raise OSError("closed")
+
+    monkeypatch.setattr(alerting_service, "ping_host", fail_ping)
+    monkeypatch.setattr(alerting_service.socket, "create_connection", fail_connection)
+
+    status, rtt_ms = monitor._probe_device_status(device)
+
+    assert status == "offline"
+    assert rtt_ms is None
 
 
 def test_admin_settings_persist_monitor_interval_seconds():

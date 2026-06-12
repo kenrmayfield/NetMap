@@ -46,6 +46,7 @@ class DiscoveryHost(BaseModel):
 
 class DiscoveryScanRead(BaseModel):
     id: int
+    schedule_id: int | None = None
     target: str
     scan_type: str
     status: str
@@ -78,3 +79,81 @@ class DiscoveryImportResult(BaseModel):
     created: int
     updated: int
     skipped_existing: int = 0
+
+
+class DiscoveryScheduleBase(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    target: str = Field(min_length=1, max_length=255)
+    scan_type: ScanType = "ping"
+    enabled: bool = True
+    interval_minutes: int = Field(default=1440, ge=15, le=10080)
+    confirm_large_scan: bool = False
+    topology_group_id: int | None = None
+    site_id: int | None = None
+    snmp_profile_id: int | None = None
+    snmp_targets: list[str] = Field(default_factory=list, max_length=8)
+    notification_targets: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("snmp_targets")
+    @classmethod
+    def validate_schedule_snmp_targets(cls, targets: list[str]) -> list[str]:
+        return [normalize_ip(target) for target in targets if target.strip()]
+
+
+class DiscoveryScheduleCreate(DiscoveryScheduleBase):
+    pass
+
+
+class DiscoveryScheduleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    target: str | None = Field(default=None, min_length=1, max_length=255)
+    scan_type: ScanType | None = None
+    enabled: bool | None = None
+    interval_minutes: int | None = Field(default=None, ge=15, le=10080)
+    confirm_large_scan: bool | None = None
+    topology_group_id: int | None = None
+    site_id: int | None = None
+    snmp_profile_id: int | None = None
+    snmp_targets: list[str] | None = Field(default=None, max_length=8)
+    notification_targets: list[str] | None = Field(default=None, max_length=8)
+
+    @field_validator("snmp_targets")
+    @classmethod
+    def validate_update_snmp_targets(cls, targets: list[str] | None) -> list[str] | None:
+        if targets is None:
+            return None
+        return [normalize_ip(target) for target in targets if target.strip()]
+
+
+class DiscoveryScheduleRead(DiscoveryScheduleBase):
+    id: int
+    owner_user_id: int
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    last_scan_id: int | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+    open_observation_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class DiscoveryObservationRead(BaseModel):
+    id: int
+    schedule_id: int
+    scan_id: int | None = None
+    device_id: int | None = None
+    observation_type: str
+    status: str
+    ip_address: str | None = None
+    mac_address: str | None = None
+    hostname: str | None = None
+    summary: str
+    details: dict = Field(default_factory=dict)
+    first_seen_at: datetime
+    last_seen_at: datetime
+    resolved_at: datetime | None = None
+
+
+class DiscoveryObservationUpdate(BaseModel):
+    status: Literal["open", "acknowledged", "resolved"]
