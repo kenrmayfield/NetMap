@@ -37,7 +37,6 @@ export function MonitoringWorkspace({
   const tableRef = useRef<HTMLTableElement | null>(null);
   const monitorCursorRef = useRef<string | null>(null);
   const deltaPollsRef = useRef(0);
-  const portDeviceRef = useRef<HTMLDivElement>(null);
   const [nowTick, setNowTick] = useState(0);
   const boundedMonitorIntervalSeconds = Math.min(3600, Math.max(30, monitorIntervalSeconds || 300));
   const monitoringPollMs = Math.min(60_000, Math.max(30_000, boundedMonitorIntervalSeconds * 1000));
@@ -119,7 +118,6 @@ export function MonitoringWorkspace({
   const [portFormScope, setPortFormScope] = useState<"global" | "device">("global");
   const [portFormDeviceId, setPortFormDeviceId] = useState<number | null>(null);
   const [portDeviceSearch, setPortDeviceSearch] = useState("");
-  const [portDeviceDropOpen, setPortDeviceDropOpen] = useState(false);
   const [portBusy, setPortBusy] = useState(false);
   const [portError, setPortError] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
@@ -247,16 +245,6 @@ export function MonitoringWorkspace({
     });
   }, [selectedId, accessToken]);
 
-  useEffect(() => {
-    if (!portDeviceDropOpen) return;
-    function handleOutside(e: MouseEvent) {
-      if (portDeviceRef.current && !portDeviceRef.current.contains(e.target as Node))
-        setPortDeviceDropOpen(false);
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [portDeviceDropOpen]);
-
   const selectedDevice = devices.find((d) => d.device_id === selectedId) ?? null;
 
   const groupOptions = useMemo(
@@ -357,7 +345,7 @@ export function MonitoringWorkspace({
           enabled: true,
         })
       ));
-      setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global"); setPortFormDeviceId(null); setPortDeviceSearch(""); setPortDeviceDropOpen(false); setShowPortForm(false);
+      setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global"); setPortFormDeviceId(null); setPortDeviceSearch(""); setShowPortForm(false);
       setPortTargets(await api.listPortTargets(accessToken));
     } catch {
       setPortError("Failed to add service check");
@@ -688,8 +676,7 @@ export function MonitoringWorkspace({
           title="Add service check"
           onCancel={() => {
             setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global");
-            setPortFormDeviceId(null); setPortDeviceSearch(""); setPortDeviceDropOpen(false);
-            setShowPortForm(false);
+            setPortFormDeviceId(null); setPortDeviceSearch(""); setShowPortForm(false);
           }}
           headerSubmitFormId="service-check-form"
           headerSubmitLabel="Add"
@@ -698,16 +685,6 @@ export function MonitoringWorkspace({
           <form id="service-check-form" className="modal-form" onSubmit={(e) => void addPortTarget(e)}>
             <div className="modal-form-row">
               <label>
-                Port(s)
-                <input
-                  type="text"
-                  placeholder="443 or 67,68 or 8080-8090"
-                  value={portFormPort}
-                  onChange={(e) => setPortFormPort(e.target.value)}
-                  autoFocus
-                />
-              </label>
-              <label>
                 Service name
                 <input
                   type="text"
@@ -715,6 +692,16 @@ export function MonitoringWorkspace({
                   value={portFormLabel}
                   onChange={(e) => setPortFormLabel(e.target.value)}
                   maxLength={60}
+                  autoFocus
+                />
+              </label>
+              <label>
+                Port(s)
+                <input
+                  type="text"
+                  placeholder="443 or 67,68 or 8080-8090"
+                  value={portFormPort}
+                  onChange={(e) => setPortFormPort(e.target.value)}
                 />
               </label>
             </div>
@@ -732,75 +719,48 @@ export function MonitoringWorkspace({
                 <option value="device">Specific device</option>
               </select>
             </label>
-            {portFormScope === "device" && (
-              <label>
-                Device
-                <div className="ep-picker" ref={portDeviceRef}>
-                <button
-                  type="button"
-                  className={`ep-trigger${portDeviceDropOpen ? " ep-trigger--open" : ""}`}
-                  onClick={() => { setPortDeviceDropOpen((o) => !o); setPortDeviceSearch(""); }}
-                >
-                  <span className="ep-trigger-label">
-                    {portFormDeviceId !== null ? (() => {
-                      const d = devices.find((x) => x.device_id === portFormDeviceId);
-                      return d ? (
-                        <>
-                          <span className="ep-trigger-name">{d.display_name ?? d.hostname ?? d.ip_address}</span>
-                          <span className="ep-trigger-sub">{d.ip_address}</span>
-                        </>
-                      ) : <span className="ep-trigger-placeholder">— select device —</span>;
-                    })() : <span className="ep-trigger-placeholder">— select device —</span>}
-                  </span>
-                  <ChevronDown size={13} className={`ep-chevron${portDeviceDropOpen ? " ep-chevron--open" : ""}`} />
-                </button>
-                {portDeviceDropOpen && (() => {
-                  const q = portDeviceSearch.toLowerCase();
-                  const filtered = devices.filter((d) =>
-                    !portDeviceSearch ||
-                    (d.display_name ?? "").toLowerCase().includes(q) ||
-                    (d.hostname ?? "").toLowerCase().includes(q) ||
-                    d.ip_address.toLowerCase().includes(q)
-                  );
-                  return (
-                    <div className="ep-dropdown" role="listbox">
-                      <div className="ep-search-row">
-                        <Search size={12} className="ep-search-icon" />
-                        <input
-                          className="ep-search"
-                          placeholder="Search devices…"
-                          autoFocus
-                          value={portDeviceSearch}
-                          onChange={(e) => setPortDeviceSearch(e.target.value)}
-                        />
-                      </div>
-                      <div className="ep-list">
-                        {filtered.map((d) => (
-                          <div
-                            key={d.device_id}
-                            role="option"
-                            aria-selected={portFormDeviceId === d.device_id}
-                            className={`ep-option${portFormDeviceId === d.device_id ? " ep-option--selected" : ""}`}
-                            onMouseDown={() => {
-                              setPortFormDeviceId(d.device_id);
-                              setPortDeviceDropOpen(false);
-                              setPortDeviceSearch("");
-                            }}
-                          >
-                            <span className="ep-option-name">{d.display_name ?? d.hostname ?? d.ip_address}</span>
-                            <span className="ep-option-ip">{d.ip_address}</span>
-                          </div>
-                        ))}
-                        {filtered.length === 0 && (
-                          <div className="ep-empty">No results for "{portDeviceSearch}"</div>
-                        )}
-                      </div>
+            {portFormScope === "device" && (() => {
+              const q = portDeviceSearch.toLowerCase();
+              const filtered = devices.filter((d) =>
+                !portDeviceSearch ||
+                (d.display_name ?? "").toLowerCase().includes(q) ||
+                (d.hostname ?? "").toLowerCase().includes(q) ||
+                d.ip_address.toLowerCase().includes(q)
+              );
+              return (
+                <label>
+                  Device
+                  <div className="mon-device-picker">
+                    <div className="ep-search-row">
+                      <Search size={12} className="ep-search-icon" />
+                      <input
+                        className="ep-search"
+                        placeholder="Search devices…"
+                        value={portDeviceSearch}
+                        onChange={(e) => setPortDeviceSearch(e.target.value)}
+                      />
                     </div>
-                  );
-                })()}
-              </div>
-              </label>
-            )}
+                    <div className="ep-list" style={{ maxHeight: 280 }}>
+                      {filtered.map((d) => (
+                        <div
+                          key={d.device_id}
+                          role="option"
+                          aria-selected={portFormDeviceId === d.device_id}
+                          className={`ep-option${portFormDeviceId === d.device_id ? " ep-option--selected" : ""}`}
+                          onMouseDown={() => { setPortFormDeviceId(d.device_id); setPortDeviceSearch(""); }}
+                        >
+                          <span className="ep-option-name">{d.display_name ?? d.hostname ?? d.ip_address}</span>
+                          <span className="ep-option-ip">{d.ip_address}</span>
+                        </div>
+                      ))}
+                      {filtered.length === 0 && (
+                        <div className="ep-empty">No results for "{portDeviceSearch}"</div>
+                      )}
+                    </div>
+                  </div>
+                </label>
+              );
+            })()}
             {portError && <span className="form-error">{portError}</span>}
           </form>
         </Modal>
