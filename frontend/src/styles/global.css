@@ -109,12 +109,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  height: 72px;
   border-radius: 20px;
-  background: linear-gradient(135deg, #1d6472 0%, #1ab0c8 100%);
-  color: #ffffff;
-  box-shadow: 0 8px 32px rgba(29, 154, 176, 0.45), 0 2px 8px rgba(0,0,0,0.4);
+  box-shadow: 0 0 44px 10px rgba(29, 154, 176, 0.22);
   margin-bottom: 8px;
 }
 
@@ -808,12 +804,6 @@ body.route-locations .topology-content {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #1d6472 0%, #1a8fa0 100%);
-  color: #ffffff;
-  box-shadow: 0 3px 10px rgba(29, 100, 114, 0.32);
 }
 
 .auth-brand-name {
@@ -11210,6 +11200,7 @@ body.theme-dark .mon-anomaly--anomalous { color: #f87171; background: rgba(248,1
 .ipam-form-input--mono { font-family: monospace; }
 .ipam-form-input--wide { min-width: 320px; }
 .ipam-form-actions { display: flex; gap: 8px; align-items: center; }
+.ipam-range-preview { margin: 0 0 12px; font-size: 12px; color: #2dba7c; }
 
 .ipam-btn {
   padding: 5px 14px;
@@ -11296,6 +11287,9 @@ body.route-locations .dash-stats { margin-bottom: 0; }
 body.route-locations .loc-stats { margin-bottom: 14px; }
 .ipam-delete-btn { color: var(--dash-red) !important; }
 .ipam-delete-btn:hover { opacity: 0.75; }
+
+.ipam-reservations-panel { border-color: rgba(100, 140, 165, 0.6); }
+body.theme-dark .ipam-reservations-panel { border-color: rgba(60, 100, 130, 0.7); }
 
 .ipam-reservations-header {
   align-items: center;
@@ -11389,7 +11383,7 @@ body.route-locations .loc-stats { margin-bottom: 14px; }
   transition: transform 0.1s;
 }
 .ipam-grid-cell--dhcp-range {
-  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.35), 0 0 0 1px rgba(37, 99, 235, 0.18);
+  box-shadow: inset 0 0 0 2px rgba(10, 15, 25, 0.6), 0 0 0 1px rgba(10, 15, 25, 0.3);
 }
 .ipam-grid-cell:hover { transform: scaleY(1.4); z-index: 1; position: relative; }
 .ipam-grid-cell--has-tip { cursor: pointer; }
@@ -11506,12 +11500,12 @@ body.theme-dark .ipam-vlan-sync-label { color: #7a9ab4; }
 .ipam-kind-badge--device   { background: rgba(45,186,124,0.12);  color: #1a7a50; }
 .ipam-kind-badge--dhcp     { background: rgba(59,128,208,0.12);  color: #1d4e8a; }
 .ipam-kind-badge--gateway  { background: rgba(245,158,11,0.12);  color: #7a5000; }
-.ipam-kind-badge--reserved { background: rgba(147,51,234,0.12);  color: #6b21a8; }
+.ipam-kind-badge--reserved { background: rgba(17,94,89,0.12);  color: #083d39; }
 .ipam-kind-badge--free     { background: rgba(160,180,192,0.12); color: #7a96a8; }
 .ipam-kind-badge--network,
 .ipam-kind-badge--broadcast { background: rgba(148,163,184,0.15); color: #5a7a95; }
 .ipam-grid-cell--reservable { cursor: crosshair; }
-.ipam-grid-cell--reservable:hover { background: rgba(29,154,176,0.22) !important; transform: scaleY(1.4); }
+.ipam-grid-cell--reservable:hover { background: #2dba7c !important; transform: scaleY(1.4); }
 
 
 /* DHCP import textarea */
@@ -11540,13 +11534,13 @@ body.theme-dark .ipam-addr-tab:hover { color: #d8eaf5; }
 body.theme-dark .ipam-kind-badge--device   { background: rgba(45,186,124,0.15);  color: #4dcf96; }
 body.theme-dark .ipam-kind-badge--dhcp     { background: rgba(59,128,208,0.15);  color: #6aacf0; }
 body.theme-dark .ipam-kind-badge--gateway  { background: rgba(245,158,11,0.15);  color: #e0b060; }
-body.theme-dark .ipam-kind-badge--reserved { background: rgba(147,51,234,0.15);  color: #c084fc; }
+body.theme-dark .ipam-kind-badge--reserved { background: rgba(17,94,89,0.15);  color: #0d9488; }
 body.theme-dark .ipam-kind-badge--free     { background: rgba(160,180,192,0.08); color: #5a7a95; }
 body.theme-dark .ipam-lease-textarea { background: #1a2535; border-color: #3a5068; color: #c8dae8; }
-body.theme-dark .ipam-dhcp-range-pill { background: #1a3a5c; border: 1.5px solid #5aa0e0; color: #bde0ff; box-shadow: 0 0 0 1px rgba(90,160,224,0.18); }
-body.theme-dark .ipam-dhcp-range-pill code { color: #bde0ff; }
+body.theme-dark .ipam-dhcp-range-pill { background: #132030; border: 1.5px solid rgba(80,140,200,0.3); color: #7aa8c4; box-shadow: none; }
+body.theme-dark .ipam-dhcp-range-pill code { color: #7aa8c4; }
 body.theme-dark .ipam-grid-cell { border-color: rgba(255,255,255,0.06); }
-body.theme-dark .ipam-grid-cell--dhcp-range { box-shadow: inset 0 0 0 2px #5aa0e0, 0 0 0 1px rgba(90,160,224,0.5); }
+body.theme-dark .ipam-grid-cell--dhcp-range { box-shadow: inset 0 0 0 2px rgba(30, 60, 95, 0.85), 0 0 0 1px rgba(30, 60, 95, 0.55); }
 body.theme-dark .ipam-tooltip-card { background: #1e2f41; border-color: #2d3d52; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
 body.theme-dark .ipam-tooltip-header { border-color: #2d3d52; }
 body.theme-dark .ipam-tooltip-ip { color: #d8eaf5; }
