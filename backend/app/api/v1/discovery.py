@@ -261,6 +261,29 @@ def list_observations(
     if status_filter != "all":
         query = query.where(DiscoveryObservation.status == status_filter)
     observations = db.scalars(query.order_by(DiscoveryObservation.last_seen_at.desc()).limit(200)).all()
+
+    # Auto-resolve open new_device observations whose IP is already in inventory.
+    stale = [o for o in observations if o.observation_type == "new_device" and o.status != "resolved" and o.ip_address]
+    if stale:
+        existing_ips = set(
+            db.scalars(
+                select(Device.ip_address).where(
+                    Device.ip_address.in_([o.ip_address for o in stale])
+                )
+            ).all()
+        )
+        now = datetime.now(timezone.utc)
+        dirty = False
+        for obs in stale:
+            if obs.ip_address in existing_ips:
+                obs.status = "resolved"
+                obs.resolved_at = now
+                dirty = True
+        if dirty:
+            db.commit()
+
+    if status_filter != "all":
+        observations = [o for o in observations if o.status == status_filter]
     return [_observation_to_read(observation) for observation in observations]
 
 

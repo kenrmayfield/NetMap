@@ -633,6 +633,7 @@ export type DeviceMonitorSummary = {
   avg_rtt_24h: number | null;
   latest_port_results: PortResult[];
   heartbeat: string[];
+  rtt_sparkline: (number | null)[];
   is_favourite: boolean;
 };
 

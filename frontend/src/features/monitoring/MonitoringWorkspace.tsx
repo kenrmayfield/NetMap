@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, useContext, type FormEvent } from "react";
 import { Search, Star, ChevronUp, ChevronDown, Activity, X } from "lucide-react";
-import { IconServer, IconWifi, IconWifiOff, IconAlertCircle } from "@tabler/icons-react";
+import { IconServer, IconWifi, IconWifiOff, IconAlertCircle, IconPlugConnected } from "@tabler/icons-react";
 import {
   api,
   type FleetSummary, type DeviceMonitorSummary, type MonitorHistoryPoint,
@@ -8,7 +8,7 @@ import {
 } from "../../api/client";
 import { TopbarNoteCtx } from "../../context";
 import { type Incident } from "../../types";
-import { MON_COL_WIDTHS_KEY, MON_COL_COUNT, computeIncidents, loadMonColWidths } from "../../utils/monitoring";
+import { MON_COL_WIDTHS_KEY, MON_COL_COUNT, MON_DEFAULT_COL_WIDTHS, computeIncidents, loadMonColWidths } from "../../utils/monitoring";
 import { DashStat } from "../../components/DashStat";
 import {
   AnomalyBadge, MonStatusDot, RttSparkline, TrendBadge, UptimeBadge,
@@ -60,13 +60,13 @@ export function MonitoringWorkspace({
     e.preventDefault();
     const startX = e.clientX;
 
-    // Snapshot all 6 resizable column widths from the DOM (th[1]..th[6], skipping Status)
+    // Snapshot all 8 resizable column widths from the DOM (th[1]..th[8], skipping Status)
     const table = tableRef.current;
     const initialWidths: number[] = table
       ? Array.from(table.querySelectorAll<HTMLElement>("thead tr th"))
           .slice(1, 1 + MON_COL_COUNT)
           .map((th) => th.getBoundingClientRect().width)
-      : (colWidths ?? Array(MON_COL_COUNT).fill(150));
+      : (colWidths ?? MON_DEFAULT_COL_WIDTHS);
 
     const startWidth = initialWidths[colIdx];
     resizingRef.current = { colIdx, startX, startWidth };
@@ -112,11 +112,11 @@ export function MonitoringWorkspace({
   const [historyHours, setHistoryHours] = useState(24);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [portTargets, setPortTargets] = useState<PortTarget[]>([]);
-  const [showPortForm, setShowPortForm] = useState(false);
+  const [showPortsModal, setShowPortsModal] = useState(false);
   const [portFormPort, setPortFormPort] = useState("");
   const [portFormLabel, setPortFormLabel] = useState("");
   const [portFormScope, setPortFormScope] = useState<"global" | "device">("global");
-  const [portFormDeviceId, setPortFormDeviceId] = useState<number | null>(null);
+  const [portFormDeviceIds, setPortFormDeviceIds] = useState<Set<number>>(new Set());
   const [portDeviceSearch, setPortDeviceSearch] = useState("");
   const [portBusy, setPortBusy] = useState(false);
   const [portError, setPortError] = useState<string | null>(null);
@@ -331,21 +331,25 @@ export function MonitoringWorkspace({
     const ports = parsePorts(portFormPort);
     if (!ports) { setPortError("Invalid port — use a number, range (e.g. 60-65), or comma-separated list (e.g. 9001, 9040, 8054)"); return; }
     if (!portFormLabel.trim()) { setPortError("Label required"); return; }
-    const targetDeviceId = portFormScope === "device" ? portFormDeviceId : null;
-    if (portFormScope === "device" && targetDeviceId === null) { setPortError("Select a device"); return; }
+    if (portFormScope === "device" && portFormDeviceIds.size === 0) { setPortError("Select at least one device"); return; }
     setPortBusy(true);
     setPortError(null);
     try {
-      await Promise.all(ports.map((port) =>
-        api.createPortTarget(accessToken, {
-          device_id: targetDeviceId,
-          port,
-          label: portFormLabel.trim(),
-          check_type: "tcp",
-          enabled: true,
-        })
-      ));
-      setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global"); setPortFormDeviceId(null); setPortDeviceSearch(""); setShowPortForm(false);
+      const deviceIds = portFormScope === "device" ? Array.from(portFormDeviceIds) : [null];
+      await Promise.all(
+        deviceIds.flatMap((deviceId) =>
+          ports.map((port) =>
+            api.createPortTarget(accessToken, {
+              device_id: deviceId,
+              port,
+              label: portFormLabel.trim(),
+              check_type: "tcp",
+              enabled: true,
+            })
+          )
+        )
+      );
+      setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global"); setPortFormDeviceIds(new Set()); setPortDeviceSearch("");
       setPortTargets(await api.listPortTargets(accessToken));
     } catch {
       setPortError("Failed to add service check");
@@ -422,13 +426,30 @@ export function MonitoringWorkspace({
           icon={<IconWifiOff size={20} />}
           accent={(fleet?.offline ?? 0) > 0 ? "red" : "green"}
         />
-        <DashStat
-          label="Unknown"
-          value={fleet?.unknown ?? 0}
-          sub="no poll data"
-          icon={<IconAlertCircle size={20} />}
-          accent="purple"
-        />
+        {(() => {
+          const labels = [...new Set(portTargets.map((p) => p.label))].sort();
+          const shown = labels.slice(0, 3);
+          const extra = labels.length - shown.length;
+          return (
+            <button
+              type="button"
+              className="dash-stat dash-stat--blue dash-stat--clickable"
+              onClick={() => setShowPortsModal(true)}
+              title="Manage service checks"
+            >
+              <div className="dash-stat-icon"><IconPlugConnected size={20} /></div>
+              <div className="dash-stat-body">
+                <strong className="dash-stat-value">{labels.length}</strong>
+                <span className="dash-stat-label">Monitored ports</span>
+                <span className="dash-stat-sub">
+                  {labels.length === 0
+                    ? "click to add checks"
+                    : shown.join(" · ") + (extra > 0 ? ` +${extra} more` : "")}
+                </span>
+              </div>
+            </button>
+          );
+        })()}
       </div>
 
 
@@ -479,8 +500,8 @@ export function MonitoringWorkspace({
                 Reset columns
               </button>
               {canManagePorts && (
-                <button type="button" className="toolbar-btn toolbar-btn--sm toolbar-btn--primary" onClick={() => setShowPortForm(true)}>
-                  + Add service check
+                <button type="button" className="toolbar-btn toolbar-btn--sm toolbar-btn--primary" onClick={() => setShowPortsModal(true)}>
+                  Ports
                 </button>
               )}
               <div className="mon-search-wrap">
@@ -503,21 +524,24 @@ export function MonitoringWorkspace({
               </p>
             ) : (
               <table
-                className="mon-table"
+                className="mon-table mon-table--fleet"
                 ref={tableRef}
                 style={{ tableLayout: "fixed" }}
               >
                 <colgroup>
-                  <col style={{ width: 40 }} />
+                  <col style={{ width: 50 }} />
                   {colWidths
                     ? colWidths.map((w, i) => <col key={i} style={{ width: w }} />)
                     : <>
-                        <col style={{ width: 360 }} />{/* Device: wide enough to show 30-beat heartbeat */}
-                        <col /><col /><col /><col />{/* 24H, 7D, RTT, Ports: equal share */}
-                        <col style={{ width: 80 }} />{/* Checked: compact */}
+                        <col style={{ width: MON_DEFAULT_COL_WIDTHS[0] }} />{/* Device */}
+                        <col />{/* 24H: equal share */}
+                        <col />{/* 7D: equal share */}
+                        <col />{/* Avg RTT: equal share */}
+                        <col />{/* Services: equal share */}
+                        <col />{/* Checked: equal share */}
                       </>
                   }
-                  <col style={{ width: 52 }} />
+                  <col style={{ width: 90 }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -613,156 +637,185 @@ export function MonitoringWorkspace({
           </div>
         </div>
 
-        {/* Service checks sidebar */}
-        <div className="dash-panel mon-ports-sidebar">
-          <div className="dash-panel-header">
-            <span className="dash-panel-title">Service checks</span>
-          </div>
-          <div className="dash-panel-body" style={{ padding: "14px 18px" }}>
-            <div className="mon-port-chips">
-              {globalPortTargets.length === 0 && (
-                <p className="dash-empty" style={{ margin: 0 }}>No service checks configured.</p>
-              )}
-              {globalPortTargets.map((p) => (
-                <span key={p.id} className="mon-port-chip">
-                  {p.label}
-                  <span className="mon-port-chip-port">:{p.port}</span>
-                  {canManagePorts && (
-                    <button
-                      type="button"
-                      className="mon-port-chip-del"
-                      onClick={() => void removePortTarget(p.id)}
-                      title={`Remove ${p.label}`}
-                    >
-                      <X size={11} />
-                    </button>
-                  )}
-                </span>
-              ))}
-            </div>
-            {selectedDevice && (
-              <div className="mon-port-chips" style={{ marginTop: 10 }}>
-                <span className="dash-panel-meta" style={{ width: "100%" }}>
-                  {selectedDevice.display_name ?? selectedDevice.hostname ?? selectedDevice.ip_address}
-                </span>
-                {selectedPortTargets.length === 0 ? (
-                  <p className="dash-empty" style={{ margin: 0 }}>No device-specific checks.</p>
-                ) : selectedPortTargets.map((p) => (
-                  <span key={p.id} className="mon-port-chip">
-                    {p.label}
-                    <span className="mon-port-chip-port">:{p.port}</span>
-                    {canManagePorts && (
-                      <button
-                        type="button"
-                        className="mon-port-chip-del"
-                        onClick={() => void removePortTarget(p.id)}
-                        title={`Remove ${p.label}`}
-                      >
-                        <X size={11} />
-                      </button>
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
       </div>{/* end mon-content */}
 
-      {/* Add service check modal */}
-      {showPortForm && (
+      {/* Service checks modal — form on left, existing list on right */}
+      {showPortsModal && (
         <Modal
-          title="Add service check"
+          title="Port Monitoring"
+          wide
           onCancel={() => {
             setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global");
-            setPortFormDeviceId(null); setPortDeviceSearch(""); setShowPortForm(false);
+            setPortFormDeviceIds(new Set()); setPortDeviceSearch(""); setShowPortsModal(false);
           }}
-          headerSubmitFormId="service-check-form"
-          headerSubmitLabel="Add"
+          headerSubmitFormId={canManagePorts ? "service-check-form" : undefined}
+          headerSubmitLabel={canManagePorts ? "Add" : undefined}
           headerSubmitDisabled={portBusy}
         >
-          <form id="service-check-form" className="modal-form" onSubmit={(e) => void addPortTarget(e)}>
-            <div className="modal-form-row">
-              <label>
-                Service name
-                <input
-                  type="text"
-                  placeholder="e.g. HTTPS, RDP, DNS"
-                  value={portFormLabel}
-                  onChange={(e) => setPortFormLabel(e.target.value)}
-                  maxLength={60}
-                  autoFocus
-                />
-              </label>
-              <label>
-                Port(s)
-                <input
-                  type="text"
-                  placeholder="443 or 67,68 or 8080-8090"
-                  value={portFormPort}
-                  onChange={(e) => setPortFormPort(e.target.value)}
-                />
-              </label>
-            </div>
-            <label>
-              Scope
-              <select
-                value={portFormScope}
-                onChange={(e) => {
-                  const scope = e.target.value as "global" | "device";
-                  setPortFormScope(scope);
-                  if (scope === "device" && selectedId !== null) setPortFormDeviceId(selectedId);
-                }}
-              >
-                <option value="global">All devices</option>
-                <option value="device">Specific device</option>
-              </select>
-            </label>
-            {portFormScope === "device" && (() => {
-              const q = portDeviceSearch.toLowerCase();
-              const filtered = devices.filter((d) =>
-                !portDeviceSearch ||
-                (d.display_name ?? "").toLowerCase().includes(q) ||
-                (d.hostname ?? "").toLowerCase().includes(q) ||
-                d.ip_address.toLowerCase().includes(q)
-              );
-              return (
-                <label>
-                  Device
-                  <div className="mon-device-picker">
-                    <div className="ep-search-row">
-                      <Search size={12} className="ep-search-icon" />
-                      <input
-                        className="ep-search"
-                        placeholder="Search devices…"
-                        value={portDeviceSearch}
-                        onChange={(e) => setPortDeviceSearch(e.target.value)}
-                      />
-                    </div>
-                    <div className="ep-list" style={{ maxHeight: 280 }}>
-                      {filtered.map((d) => (
-                        <div
-                          key={d.device_id}
-                          role="option"
-                          aria-selected={portFormDeviceId === d.device_id}
-                          className={`ep-option${portFormDeviceId === d.device_id ? " ep-option--selected" : ""}`}
-                          onMouseDown={() => { setPortFormDeviceId(d.device_id); setPortDeviceSearch(""); }}
-                        >
-                          <span className="ep-option-name">{d.display_name ?? d.hostname ?? d.ip_address}</span>
-                          <span className="ep-option-ip">{d.ip_address}</span>
+          <div className="mon-ports-modal-body">
+
+            {/* Left column: add form */}
+            {canManagePorts && (
+              <div className="mon-ports-form-col">
+                <form id="service-check-form" onSubmit={(e) => void addPortTarget(e)}>
+                  <label className="mon-ports-field-label">
+                    Service name
+                    <input
+                      type="text"
+                      className="mon-ports-input"
+                      placeholder="e.g. HTTPS, RDP, DNS"
+                      value={portFormLabel}
+                      onChange={(e) => setPortFormLabel(e.target.value)}
+                      maxLength={60}
+                      autoFocus
+                    />
+                  </label>
+                  <label className="mon-ports-field-label">
+                    Port(s)
+                    <input
+                      type="text"
+                      className="mon-ports-input"
+                      placeholder="443 or 67,68 or 8080-8090"
+                      value={portFormPort}
+                      onChange={(e) => setPortFormPort(e.target.value)}
+                    />
+                  </label>
+                  <label className="mon-ports-field-label">
+                    Scope
+                    <select
+                      className="mon-ports-input"
+                      value={portFormScope}
+                      onChange={(e) => {
+                        const scope = e.target.value as "global" | "device";
+                        setPortFormScope(scope);
+                        if (scope === "device" && selectedId !== null) setPortFormDeviceIds(new Set([selectedId]));
+                        else if (scope === "global") setPortFormDeviceIds(new Set());
+                      }}
+                    >
+                      <option value="global">All devices</option>
+                      <option value="device">Specific devices</option>
+                    </select>
+                  </label>
+                  {portFormScope === "device" && (() => {
+                    const q = portDeviceSearch.toLowerCase();
+                    const filtered = devices.filter((d) =>
+                      !portDeviceSearch ||
+                      (d.display_name ?? "").toLowerCase().includes(q) ||
+                      (d.hostname ?? "").toLowerCase().includes(q) ||
+                      d.ip_address.toLowerCase().includes(q)
+                    );
+                    return (
+                      <label className="mon-ports-field-label">
+                        Devices{portFormDeviceIds.size > 0 && <span className="mon-ports-sel-count"> · {portFormDeviceIds.size} selected</span>}
+                        <div className="mon-device-picker">
+                          <div className="ep-search-row">
+                            <Search size={12} className="ep-search-icon" />
+                            <input
+                              className="ep-search"
+                              placeholder="Search devices…"
+                              value={portDeviceSearch}
+                              onChange={(e) => setPortDeviceSearch(e.target.value)}
+                            />
+                          </div>
+                          <div className="ep-list">
+                            {filtered.map((d) => {
+                              const selected = portFormDeviceIds.has(d.device_id);
+                              return (
+                                <div
+                                  key={d.device_id}
+                                  role="option"
+                                  aria-selected={selected}
+                                  className={`ep-option ep-option--multi${selected ? " ep-option--selected" : ""}`}
+                                  onMouseDown={() => setPortFormDeviceIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(d.device_id)) next.delete(d.device_id);
+                                    else next.add(d.device_id);
+                                    return next;
+                                  })}
+                                >
+                                  <span className="ep-option-check">{selected ? "✓" : ""}</span>
+                                  <span className="ep-option-name">{d.display_name ?? d.hostname ?? d.ip_address}</span>
+                                  <span className="ep-option-ip">{d.ip_address}</span>
+                                </div>
+                              );
+                            })}
+                            {filtered.length === 0 && (
+                              <div className="ep-empty">No results for "{portDeviceSearch}"</div>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })()}
+                  {portError && <span className="form-error">{portError}</span>}
+                </form>
+              </div>
+            )}
+
+            {/* Right column: existing checks list */}
+            {portTargets.length > 0 && (
+              <div className="mon-ports-list-col">
+                {portTargets.filter((p) => p.device_id === null).length > 0 && (
+                  <div>
+                    <p className="mon-checks-group-label">All devices</p>
+                    <div className="incident-log">
+                      {portTargets.filter((p) => p.device_id === null).map((p) => (
+                        <div key={p.id} className="incident-row" style={{ alignItems: "center" }}>
+                          <span className="mon-dot mon-dot-online" />
+                          <div className="incident-row-body">
+                            <span style={{ fontWeight: 600, fontSize: 12.5 }}>{p.label}</span>
+                            <span className="dash-panel-meta">port {p.port}</span>
+                          </div>
+                          {canManagePorts && (
+                            <button type="button" className="mon-port-chip-del" onClick={() => void removePortTarget(p.id)} title={`Remove ${p.label}`}>
+                              <X size={13} />
+                            </button>
+                          )}
                         </div>
                       ))}
-                      {filtered.length === 0 && (
-                        <div className="ep-empty">No results for "{portDeviceSearch}"</div>
-                      )}
                     </div>
                   </div>
-                </label>
-              );
-            })()}
-            {portError && <span className="form-error">{portError}</span>}
-          </form>
+                )}
+                {(() => {
+                  const deviceSpecific = portTargets.filter((p) => p.device_id !== null);
+                  if (deviceSpecific.length === 0) return null;
+                  const grouped = deviceSpecific.reduce<Record<number, PortTarget[]>>((acc, p) => {
+                    const key = p.device_id!;
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(p);
+                    return acc;
+                  }, {});
+                  return (
+                    <div>
+                      <p className="mon-checks-group-label">Device-specific</p>
+                      <div className="incident-log">
+                        {Object.entries(grouped).map(([deviceIdStr, checks]) => {
+                          const devId = Number(deviceIdStr);
+                          const dev = devices.find((d) => d.device_id === devId);
+                          const devName = dev ? (dev.display_name ?? dev.hostname ?? dev.ip_address) : `Device #${devId}`;
+                          return checks.map((p) => (
+                            <div key={p.id} className="incident-row" style={{ alignItems: "center" }}>
+                              <span className="mon-dot mon-dot-online" />
+                              <div className="incident-row-body" style={{ flexDirection: "column", alignItems: "flex-start", gap: 1 }}>
+                                <span style={{ fontWeight: 600, fontSize: 12.5 }}>{p.label}</span>
+                                <span className="dash-panel-meta">{devName} · port {p.port}</span>
+                              </div>
+                              {canManagePorts && (
+                                <button type="button" className="mon-port-chip-del" onClick={() => void removePortTarget(p.id)} title={`Remove ${p.label}`}>
+                                  <X size={13} />
+                                </button>
+                              )}
+                            </div>
+                          ));
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+          </div>
         </Modal>
       )}
 
@@ -901,7 +954,7 @@ export function MonitoringWorkspace({
 
                   {(() => {
                     const relevantRules = allAlertRules.filter(
-                      (r) => r.device_id === null || r.device_id === selectedDevice.device_id,
+                      (r) => r.device_id === selectedDevice.device_id,
                     );
                     return (
                       <div className="mon-hero-section">
@@ -913,8 +966,8 @@ export function MonitoringWorkspace({
                         </div>
                         <div className="incident-log">
                           {relevantRules.length === 0 ? (
-                            <p className="dash-empty" style={{ margin: 0, padding: "8px 0" }}>
-                              No alert rules cover this device.
+                            <p className="dash-empty" style={{ margin: 0, padding: "8px 0", textAlign: "center" }}>
+                              No alert rules for this device.
                               {(userRole === "SuperAdmin" || userRole === "NetworkAdmin") && (
                                 <> Configure them in <strong>Admin → Alerts</strong>.</>
                               )}

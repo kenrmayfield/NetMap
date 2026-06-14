@@ -40,6 +40,7 @@ class DeviceMonitorSummary(BaseModel):
     avg_rtt_24h: float | None
     latest_port_results: list[PortResult]
     heartbeat: list[str] = []  # last 50 poll statuses, oldest → newest
+    rtt_sparkline: list[float | None] = []  # matching rtt_ms values, same order
     is_favourite: bool = False
 
 

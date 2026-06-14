@@ -201,6 +201,7 @@ def _build_device_summaries(
         history_7d_count, online_7d = uptime_7d_by_device.get(device.id, (0, 0))
         last_record = history_recent[0] if history_recent else None
         heartbeat = [h.status for h in reversed(history_recent)]
+        rtt_sparkline: list[float | None] = [h.rtt_ms for h in reversed(history_recent)]
 
         results.append(
             DeviceMonitorSummary(
@@ -219,6 +220,7 @@ def _build_device_summaries(
                 avg_rtt_24h=float(avg_rtt_24h) if avg_rtt_24h is not None else None,
                 latest_port_results=_parse_port_results(last_record.port_results) if last_record else [],
                 heartbeat=heartbeat,
+                rtt_sparkline=rtt_sparkline,
                 is_favourite=bool(device.is_favourite),
             )
         )

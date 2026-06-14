@@ -71,7 +71,7 @@ export function RttSparkline({ data }: { data: MonitorHistoryPoint[] }) {
           <line className="mon-sparkline-grid" x1={0} y1={H - 5} x2={W} y2={H - 5} />
           <line className="mon-sparkline-avg" x1={0} y1={avgY} x2={W} y2={avgY} />
           <polyline className="mon-sparkline-line" points={points} />
-          <circle className="mon-sparkline-endpoint" cx={lastX} cy={lastY} r="1.7" />
+
         </svg>
         <div className="mon-sparkline-xaxis">
           <span>{fmtTs(valid[0].checked_at)}</span>
@@ -79,6 +79,28 @@ export function RttSparkline({ data }: { data: MonitorHistoryPoint[] }) {
         </div>
       </div>
     </div>
+  );
+}
+
+export function MiniRttSparkline({ data }: { data: (number | null)[] }) {
+  const valid = data.filter((v): v is number => v !== null);
+  if (valid.length < 2) return null;
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const range = max - min || 1;
+  const H = 18, W = 100;
+  const step = W / (valid.length - 1);
+  const yOf = (v: number) => H - ((v - min) / range) * (H - 2) - 1;
+  const points = valid.map((v, i) => `${(i * step).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+  return (
+    <svg
+      className="mon-mini-sparkline"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <polyline className="mon-mini-sparkline-line" points={points} />
+    </svg>
   );
 }
 

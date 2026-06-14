@@ -997,7 +997,7 @@ export function TopologyWorkspace({
       return;
     }
     cy.$("node.zone").style({
-      "background-opacity": Math.max(0, Math.min(1, groupZoneOpacityPercent / 100)),
+      "background-opacity": (groupZoneOpacityPercent / 100) * 0.12,
       "border-opacity": showGroupZoneBorders ? 0.1 : 0,
       "border-width": showGroupZoneBorders ? 2 : 0,
     });

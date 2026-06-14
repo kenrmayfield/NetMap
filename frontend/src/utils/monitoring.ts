@@ -9,9 +9,10 @@ export const BEAT_COLOR: Record<string, string> = {
 
 export const HB_MAX_BEATS = 120;
 
-export const MON_COL_WIDTHS_KEY = "netmap.mon_col_widths_v2";
-// 6 resizable cols: Device | 24h | 7d | Avg RTT | Ports | Checked  (Status+Fav fixed)
+export const MON_COL_WIDTHS_KEY = "netmap.mon_col_widths_v8";
+// 6 resizable cols: Device | 24h | 7d | Avg RTT | Services | Checked  (Status+Fav fixed)
 export const MON_COL_COUNT = 6;
+export const MON_DEFAULT_COL_WIDTHS = [420, 100, 100, 100, 100, 100];
 
 export function beatBg(status: string) {
   return BEAT_COLOR[status] ?? BEAT_COLOR.unknown;

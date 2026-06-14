@@ -175,7 +175,7 @@ export type TopologyDisplayPrefsLocal = {
   nodeLabelFontSize?: number;
 };
 
-export const MAX_GROUP_ZONE_OPACITY_PERCENT = 10;
+export const MAX_GROUP_ZONE_OPACITY_PERCENT = 100;
 export const MAX_GROUP_ZONE_OPACITY_SLIDER_PERCENT = 100;
 
 export function clampGroupZoneOpacityPercent(value: unknown): number | undefined {
