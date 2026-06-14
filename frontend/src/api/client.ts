@@ -32,6 +32,7 @@ export type Device = {
   ip_address: string;
   mac_address: string | null;
   vendor: string | null;
+  os: string | null;
   device_type: string | null;
   status: DeviceStatus;
   monitor_status: DeviceStatus | null;
@@ -68,6 +69,7 @@ export type DevicePayload = {
   ip_address: string | null;
   mac_address: string | null;
   vendor: string | null;
+  os: string | null;
   device_type: string | null;
   status: DeviceStatus;
   icon: DeviceIcon;

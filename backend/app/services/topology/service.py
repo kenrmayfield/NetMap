@@ -28,6 +28,7 @@ def device_to_dict(device: Device) -> dict:
         "ip_address": device.ip_address,
         "mac_address": device.mac_address,
         "vendor": device.vendor,
+        "os": device.os,
         "device_type": device.device_type,
         "status": device.status,
         "icon": device.icon,

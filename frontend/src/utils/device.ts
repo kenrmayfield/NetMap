@@ -8,6 +8,7 @@ export function buildDevicePayload(device: Device, overrides: Partial<DevicePayl
     ip_address: device.ip_address ?? "",
     mac_address: device.mac_address,
     vendor: device.vendor,
+    os: device.os,
     device_type: device.device_type,
     status: device.status,
     icon: (deviceTypeIconMap[device.device_type ?? ""] || device.icon || "device") as DeviceIcon,

@@ -115,7 +115,7 @@ def fleet_summary(
         offline=offline,
         unknown=unknown,
         avg_rtt_ms=float(avg_rtt) if avg_rtt is not None else None,
-        last_checked=last_checked_row,
+        last_checked=_as_utc(last_checked_row) if last_checked_row else None,
     )
     _fleet_summary_cache = (now_mono, result)
     return result
@@ -213,7 +213,7 @@ def _build_device_summaries(
                 site_id=device.site_id,
                 site_name=site_map.get(device.site_id) if device.site_id else None,
                 vlan_id=device.vlan_id or None,
-                last_checked=last_record.checked_at if last_record else None,
+                last_checked=_as_utc(last_record.checked_at) if last_record else None,
                 uptime_24h=online_24h / total_24h if total_24h > 0 else None,
                 uptime_7d=online_7d / history_7d_count if history_7d_count > 0 else None,
                 avg_rtt_24h=float(avg_rtt_24h) if avg_rtt_24h is not None else None,
@@ -289,7 +289,7 @@ def device_history(
     return [
         MonitorHistoryPoint(
             id=r.id,
-            checked_at=r.checked_at,
+            checked_at=_as_utc(r.checked_at),
             status=r.status,
             rtt_ms=r.rtt_ms,
             port_results=_parse_port_results(r.port_results),

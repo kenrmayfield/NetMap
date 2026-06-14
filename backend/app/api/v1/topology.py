@@ -62,7 +62,7 @@ from app.services.search import build_device_event_counts, correlation_window_st
 from app.services.audit.service import write_audit
 from app.services.tools.service import ping_host
 from app.services.topology.service import device_to_dict, serialize_tags
-from app.services.snmp import SnmpError, read_snmp_arp_table, SnmpClient
+from app.services.snmp import OID_SYS_DESCR, OID_SYS_NAME, SnmpError, read_snmp_arp_table, SnmpClient, value_to_text
 from app.services.snmp_profiles import decrypt_profile_community
 
 router = APIRouter(prefix="/topology", tags=["topology"])
@@ -837,6 +837,8 @@ def _snmp_arp_enrichment_preview(db: Session, source_device: Device) -> DeviceSn
             timeout_seconds=profile.timeout_seconds,
             retries=profile.retries,
         )
+        sys_descr = value_to_text(client.get(OID_SYS_DESCR))
+        sys_name = value_to_text(client.get(OID_SYS_NAME))
         arp_entries = read_snmp_arp_table(client)
     except TimeoutError as exc:
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
@@ -848,6 +850,27 @@ def _snmp_arp_enrichment_preview(db: Session, source_device: Device) -> DeviceSn
         for device in db.scalars(select(Device).where(Device.ip_address != source_device.ip_address)).all()
     }
     changes: list[DeviceSnmpEnrichmentChange] = []
+
+    # Suggest OS (sysDescr) and hostname (sysName) for the source device itself
+    if sys_descr and not source_device.os:
+        changes.append(DeviceSnmpEnrichmentChange(
+            device_id=source_device.id,
+            ip_address=source_device.ip_address,
+            field="os",
+            current=None,
+            suggested=sys_descr,
+            source=f"snmp:sysDescr",
+        ))
+    if sys_name and not source_device.hostname:
+        changes.append(DeviceSnmpEnrichmentChange(
+            device_id=source_device.id,
+            ip_address=source_device.ip_address,
+            field="hostname",
+            current=None,
+            suggested=sys_name,
+            source=f"snmp:sysName",
+        ))
+
     for entry in arp_entries:
         device = devices_by_ip.get(entry.ip_address)
         if device is None:

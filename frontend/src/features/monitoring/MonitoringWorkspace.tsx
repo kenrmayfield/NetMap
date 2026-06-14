@@ -36,12 +36,24 @@ export function MonitoringWorkspace({
   const tableRef = useRef<HTMLTableElement | null>(null);
   const monitorCursorRef = useRef<string | null>(null);
   const deltaPollsRef = useRef(0);
+  const [nowTick, setNowTick] = useState(0);
   const boundedMonitorIntervalSeconds = Math.min(3600, Math.max(30, monitorIntervalSeconds || 300));
   const monitoringPollMs = Math.min(60_000, Math.max(30_000, boundedMonitorIntervalSeconds * 1000));
   const fullRefreshPolls = Math.max(1, Math.ceil(300_000 / monitoringPollMs));
   const monitorIntervalLabel = boundedMonitorIntervalSeconds >= 60 && boundedMonitorIntervalSeconds % 60 === 0
     ? `${boundedMonitorIntervalSeconds / 60} min`
     : `${boundedMonitorIntervalSeconds} sec`;
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  function relativeTime(iso: string): string {
+    const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+    if (diffMin < 1) return "just now";
+    return `${diffMin} min ago`;
+  }
 
   function startColResize(colIdx: number, e: React.MouseEvent) {
     e.preventDefault();
@@ -168,13 +180,13 @@ export function MonitoringWorkspace({
       setTopbarNote(
         <div className="app-topbar-mon-status">
           <span className="app-topbar-status"><span aria-hidden="true" />Live</span>
-          <span className="app-topbar-note">Last poll {new Date(fleet.last_checked).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · every {monitorIntervalLabel}</span>
+          <span className="app-topbar-note">Last poll {new Date(fleet.last_checked).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ({relativeTime(fleet.last_checked)}) · every {monitorIntervalLabel}</span>
         </div>
       );
     } else {
       setTopbarNote(<span className="app-topbar-status"><span aria-hidden="true" />Live</span>);
     }
-  }, [fleet, livePingEnabled, monitorIntervalLabel, setTopbarNote]);
+  }, [fleet, livePingEnabled, monitorIntervalLabel, nowTick, relativeTime, setTopbarNote]);
   useEffect(() => () => setTopbarNote(""), [setTopbarNote]);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
@@ -293,22 +305,42 @@ export function MonitoringWorkspace({
 
   const offlineDevices = useMemo(() => devices.filter((d) => d.status === "offline"), [devices]);
 
+  function parsePorts(raw: string): number[] | null {
+    const ports: number[] = [];
+    for (const token of raw.split(",").map((t) => t.trim()).filter(Boolean)) {
+      const range = token.match(/^(\d+)-(\d+)$/);
+      if (range) {
+        const start = parseInt(range[1], 10);
+        const end = parseInt(range[2], 10);
+        if (start < 1 || end > 65535 || start > end || end - start > 100) return null;
+        for (let p = start; p <= end; p++) ports.push(p);
+      } else {
+        const p = parseInt(token, 10);
+        if (isNaN(p) || p < 1 || p > 65535) return null;
+        ports.push(p);
+      }
+    }
+    return ports.length > 0 ? ports : null;
+  }
+
   async function addPortTarget(e: FormEvent) {
     e.preventDefault();
-    const port = parseInt(portFormPort, 10);
-    if (!port || port < 1 || port > 65535) { setPortError("Invalid port"); return; }
+    const ports = parsePorts(portFormPort);
+    if (!ports) { setPortError("Invalid port — use a number, range (e.g. 60-65), or comma-separated list (e.g. 9001, 9040, 8054)"); return; }
     if (!portFormLabel.trim()) { setPortError("Label required"); return; }
     if (portFormScope === "device" && selectedId === null) { setPortError("Select a device first"); return; }
     setPortBusy(true);
     setPortError(null);
     try {
-      await api.createPortTarget(accessToken, {
-        device_id: portFormScope === "device" ? selectedId : null,
-        port,
-        label: portFormLabel.trim(),
-        check_type: "tcp",
-        enabled: true,
-      });
+      await Promise.all(ports.map((port) =>
+        api.createPortTarget(accessToken, {
+          device_id: portFormScope === "device" ? selectedId : null,
+          port,
+          label: portFormLabel.trim(),
+          check_type: "tcp",
+          enabled: true,
+        })
+      ));
       setPortFormPort(""); setPortFormLabel(""); setPortFormScope("global"); setShowPortForm(false);
       setPortTargets(await api.listPortTargets(accessToken));
     } catch {
@@ -591,11 +623,10 @@ export function MonitoringWorkspace({
               <form className="mon-port-form" onSubmit={(e) => void addPortTarget(e)}>
                 <input
                   className="mon-port-input"
-                  type="number"
-                  placeholder="Port (e.g. 3389)"
+                  type="text"
+                  placeholder="Port(s): 443 or 67,68 or 8080-8090"
                   value={portFormPort}
                   onChange={(e) => setPortFormPort(e.target.value)}
-                  min={1} max={65535}
                 />
                 <input
                   className="mon-port-input"
@@ -613,7 +644,7 @@ export function MonitoringWorkspace({
                   <option value="global">All devices</option>
                   <option value="device" disabled={selectedId === null}>Selected device</option>
                 </select>
-                <button type="submit" disabled={portBusy}>Add</button>
+                <button type="submit" className="toolbar-btn toolbar-btn--sm toolbar-btn--primary" disabled={portBusy}>Add</button>
                 {portError && <span className="form-error">{portError}</span>}
               </form>
             )}

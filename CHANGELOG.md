@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.2.8] - 2026-06-12
+
+### LLDP
+- Started LLDP implementation: added LLDP Neighbours tool under the Tools workspace. Queries any device's LLDP-MIB over SNMP (uses the device's assigned credential profile) to discover adjacent devices on each switch port.
+- Discovered neighbours are stored and matched to existing inventory by MAC address, management IP, or hostname. Unmatched neighbours are flagged for review.
+- From the results table, users can create a topology link between matched device pairs with one click, or dismiss neighbours they want to ignore.
+
+### Devices
+- Added **OS field** to device details and forms. Stores the operating system string (e.g. "Ubuntu 24.04", "Windows Server 2025", "Cisco IOS") and is editable inline in device details or via the Add/Edit device form. SNMP enrichment preview now suggests `sysDescr` as the OS value and `sysName` as the hostname for the source device when those fields are blank.
+- Device details now show a **Created** timestamp (read-only) at the bottom of the details panel.
+
+### Monitoring
+- Fixed: public IPs registered in inventory were always probed as offline. The background monitor now probes all registered devices regardless of the public-targets gate (a Tools-tab-only restriction for interactive user pings).
+- Fixed: the Devices panel in the Monitoring workspace no longer has a fixed 520 px height cap — it now expands to fill available viewport height.
+- Service checks port field now accepts port ranges (`60-65`), comma-separated ports (`9001, 9040, 8054`), or any combination. Each port gets its own check entry under the same label.
+- The "Last poll" topbar indicator now shows a live relative time (e.g. "2 min ago") that updates every 30 seconds, alongside the absolute poll time.
+- Styled the "Add" service check button consistently with the rest of the app theme.
+
+### App
+- Dark mode is now the default for new installations and users who have not previously set a theme preference.
+
+---
+
 ## [1.2.7] - 2026-06-03
 
 ### Discovery

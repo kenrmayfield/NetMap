@@ -25,6 +25,7 @@ class Device(Base):
     ip_address: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     mac_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    os: Mapped[str | None] = mapped_column(String(255), nullable=True)
     device_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=DeviceStatus.UNKNOWN, nullable=False)
     monitor_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default=None)

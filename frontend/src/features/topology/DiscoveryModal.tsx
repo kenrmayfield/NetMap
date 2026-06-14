@@ -3,9 +3,6 @@ import {
   type DiscoveryScan,
   type DiscoveryScanType,
   type DiscoveryHost,
-  type DiscoveryObservation,
-  type DiscoverySchedule,
-  type NotificationProfile,
   type SnmpProfile,
   type TopologyGroup,
   type Site,
@@ -47,8 +44,6 @@ export function DiscoveryModal({
   const [snmpEnabled, setSnmpEnabled] = useState(false);
   const [snmpProfiles, setSnmpProfiles] = useState<SnmpProfile[]>([]);
   const [snmpProfileId, setSnmpProfileId] = useState("");
-  const [notificationProfiles, setNotificationProfiles] = useState<NotificationProfile[]>([]);
-  const [scheduleNotificationProfileId, setScheduleNotificationProfileId] = useState("");
   const [snmpTargets, setSnmpTargets] = useState("");
   const [snmpCommunity, setSnmpCommunity] = useState("public");
   const [snmpPort, setSnmpPort] = useState("161");
@@ -58,12 +53,6 @@ export function DiscoveryModal({
   const [importMode, setImportMode] = useState<"new_only" | "fill_missing" | "override_existing">("fill_missing");
   const [updateFields, setUpdateFields] = useState<Array<"hostname" | "mac_address" | "vendor">>(["hostname", "mac_address", "vendor"]);
   const [updateIpOnMacMatch, setUpdateIpOnMacMatch] = useState(false);
-  const [schedules, setSchedules] = useState<DiscoverySchedule[]>([]);
-  const [observations, setObservations] = useState<DiscoveryObservation[]>([]);
-  const [scheduleName, setScheduleName] = useState("");
-  const [scheduleInterval, setScheduleInterval] = useState("1440");
-  const [scheduleEnabled, setScheduleEnabled] = useState(true);
-  const [scheduleBusy, setScheduleBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const targetEstimate = estimateScanTarget(target);
@@ -76,23 +65,7 @@ export function DiscoveryModal({
     api.topologyGroups(accessToken).then(setGroups).catch(() => {});
     api.sites(accessToken).then(setSites).catch(() => {});
     api.listSnmpProfiles(accessToken).then(setSnmpProfiles).catch(() => {});
-    api.listNotificationProfiles(accessToken).then(setNotificationProfiles).catch(() => {});
-    void loadSchedulesAndObservations();
   }, [accessToken]);
-
-  async function loadSchedulesAndObservations() {
-    if (!accessToken) return;
-    try {
-      const [nextSchedules, nextObservations] = await Promise.all([
-        api.listDiscoverySchedules(accessToken),
-        api.listDiscoveryObservations(accessToken, { status_filter: "all" }),
-      ]);
-      setSchedules(nextSchedules);
-      setObservations(nextObservations);
-    } catch {
-      // Non-critical in the manual scan modal.
-    }
-  }
 
   async function createNewGroup() {
     if (!accessToken || !newGroupName.trim()) return;
@@ -198,90 +171,6 @@ export function DiscoveryModal({
     }
   }
 
-  async function createSchedule() {
-    if (!accessToken || !target.trim()) return;
-    setScheduleBusy(true);
-    setError(null);
-    try {
-      await api.createDiscoverySchedule(accessToken, {
-        name: scheduleName.trim() || target.trim(),
-        target,
-        scan_type: scanType,
-        enabled: scheduleEnabled,
-        interval_minutes: Number(scheduleInterval),
-        confirm_large_scan: confirmLargeScan,
-        topology_group_id: selectedGroupId ? Number(selectedGroupId) : null,
-        site_id: selectedSiteId ? Number(selectedSiteId) : null,
-        snmp_profile_id: snmpEnabled && snmpProfileId ? Number(snmpProfileId) : null,
-        snmp_targets: snmpEnabled
-          ? (snmpTargets.trim() || selectedGroup?.gateway || "").split(/[\s,]+/).map((value) => value.trim()).filter(Boolean)
-          : [],
-        notification_targets: scheduleNotificationProfileId ? [`profile:${scheduleNotificationProfileId}`] : [],
-      });
-      setScheduleName("");
-      await loadSchedulesAndObservations();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create scheduled scan");
-    } finally {
-      setScheduleBusy(false);
-    }
-  }
-
-  async function toggleSchedule(schedule: DiscoverySchedule) {
-    if (!accessToken) return;
-    setScheduleBusy(true);
-    try {
-      await api.updateDiscoverySchedule(accessToken, schedule.id, { enabled: !schedule.enabled });
-      await loadSchedulesAndObservations();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update schedule");
-    } finally {
-      setScheduleBusy(false);
-    }
-  }
-
-  async function runSchedule(schedule: DiscoverySchedule) {
-    if (!accessToken) return;
-    setScheduleBusy(true);
-    setError(null);
-    try {
-      const nextScan = await api.runDiscoverySchedule(accessToken, schedule.id);
-      setScan(nextScan);
-      setSelectedIps(new Set(nextScan.results.map((host) => host.ip_address)));
-      await loadSchedulesAndObservations();
-      if (nextScan.status === "failed") {
-        setError(nextScan.error || "Scheduled scan failed");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run scheduled scan");
-    } finally {
-      setScheduleBusy(false);
-    }
-  }
-
-  async function deleteSchedule(schedule: DiscoverySchedule) {
-    if (!accessToken) return;
-    setScheduleBusy(true);
-    try {
-      await api.deleteDiscoverySchedule(accessToken, schedule.id);
-      await loadSchedulesAndObservations();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete schedule");
-    } finally {
-      setScheduleBusy(false);
-    }
-  }
-
-  async function updateObservation(observation: DiscoveryObservation, status: "open" | "acknowledged" | "resolved") {
-    if (!accessToken) return;
-    try {
-      await api.updateDiscoveryObservation(accessToken, observation.id, status);
-      await loadSchedulesAndObservations();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update observation");
-    }
-  }
-
   function toggleHost(host: DiscoveryHost) {
     setSelectedIps((current) => {
       const next = new Set(current);
@@ -307,8 +196,6 @@ export function DiscoveryModal({
     },
     { new: 0, existing: 0, changed: 0 },
   ) ?? { new: 0, existing: 0, changed: 0 };
-  const openObservations = observations.filter((observation) => observation.status !== "resolved");
-
   return (
     <Modal title="Discover devices" onCancel={onCancel}>
       <form className="modal-form" onSubmit={(e) => void submit(e)}>
@@ -471,108 +358,6 @@ export function DiscoveryModal({
           </button>
         </div>
       </form>
-      <div className="scan-schedule-panel">
-        <div className="scan-schedule-header">
-          <div>
-            <strong>Scheduled scans</strong>
-            <span>Run saved targets automatically and review network changes before applying inventory updates.</span>
-          </div>
-          <button type="button" className="ipam-btn" disabled={scheduleBusy} onClick={() => void loadSchedulesAndObservations()}>
-            Refresh
-          </button>
-        </div>
-        <div className="scan-schedule-form">
-          <label>
-            Name
-            <input
-              placeholder="Daily LAN discovery"
-              value={scheduleName}
-              onChange={(event) => setScheduleName(event.target.value)}
-            />
-          </label>
-          <label>
-            Interval
-            <select value={scheduleInterval} onChange={(event) => setScheduleInterval(event.target.value)}>
-              <option value="60">Hourly</option>
-              <option value="360">Every 6 hours</option>
-              <option value="720">Every 12 hours</option>
-              <option value="1440">Daily</option>
-              <option value="10080">Weekly</option>
-            </select>
-          </label>
-          <label>
-            Notify
-            <select value={scheduleNotificationProfileId} onChange={(event) => setScheduleNotificationProfileId(event.target.value)}>
-              <option value="">No notification</option>
-              {notificationProfiles.filter((profile) => profile.enabled).map((profile) => (
-                <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="scan-confirm-check">
-            <input checked={scheduleEnabled} type="checkbox" onChange={(event) => setScheduleEnabled(event.target.checked)} />
-            Enabled
-          </label>
-          <button
-            type="button"
-            className="ipam-btn ipam-btn--primary"
-            disabled={scheduleBusy || !target.trim() || (!confirmLargeScan && requiresConfirmation)}
-            onClick={() => void createSchedule()}
-          >
-            {scheduleBusy ? "Saving..." : "Save schedule"}
-          </button>
-        </div>
-        {schedules.length > 0 && (
-          <div className="scan-schedule-list">
-            {schedules.map((schedule) => (
-              <div key={schedule.id} className="scan-schedule-row">
-                <div>
-                  <strong>{schedule.name}</strong>
-                  <span>
-                    {schedule.target} · every {schedule.interval_minutes} min · {schedule.enabled ? "enabled" : "paused"}
-                    {schedule.open_observation_count > 0 ? ` · ${schedule.open_observation_count} open` : ""}
-                  </span>
-                  <span>
-                    Last: {schedule.last_run_at ? new Date(schedule.last_run_at).toLocaleString() : "never"}
-                    {schedule.last_error ? ` · ${schedule.last_error}` : ""}
-                  </span>
-                </div>
-                <div className="scan-schedule-actions">
-                  <button type="button" className="ipam-btn" disabled={scheduleBusy} onClick={() => void runSchedule(schedule)}>Run</button>
-                  <button type="button" className="ipam-btn" disabled={scheduleBusy} onClick={() => void toggleSchedule(schedule)}>
-                    {schedule.enabled ? "Pause" : "Enable"}
-                  </button>
-                  <button type="button" className="ipam-btn ipam-btn--danger" disabled={scheduleBusy} onClick={() => void deleteSchedule(schedule)}>Delete</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {openObservations.length > 0 && (
-          <div className="scan-observation-list">
-            <strong>Change review</strong>
-            {openObservations.slice(0, 8).map((observation) => (
-              <div key={observation.id} className="scan-observation-row">
-                <div>
-                  <span className={`scan-observation-badge scan-observation-badge--${observation.observation_type}`}>
-                    {observation.observation_type.replace("_", " ")}
-                  </span>
-                  <strong>{observation.summary}</strong>
-                  <span>
-                    {observation.hostname || observation.mac_address || "No host identity"} · seen {new Date(observation.last_seen_at).toLocaleString()}
-                  </span>
-                </div>
-                <div className="scan-schedule-actions">
-                  {observation.status === "open" && (
-                    <button type="button" className="ipam-btn" onClick={() => void updateObservation(observation, "acknowledged")}>Acknowledge</button>
-                  )}
-                  <button type="button" className="ipam-btn" onClick={() => void updateObservation(observation, "resolved")}>Resolve</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
       {scan && (
         <div className="scan-results">
           <div className="scan-summary">

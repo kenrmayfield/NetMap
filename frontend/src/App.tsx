@@ -36,7 +36,7 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("netmap.sidebar_collapsed") === "1");
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const stored = window.localStorage.getItem(themeStorageKey);
-    return stored === "dark" ? "dark" : "light";
+    return stored === "light" ? "light" : "dark";
   });
   const [iconPacks, setIconPacks] = useState<IconPack[]>([]);
   const [localIconPacks, setLocalIconPacks] = useState<IconPack[]>(() => readLocalIconPacks());

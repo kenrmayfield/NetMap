@@ -124,6 +124,7 @@ def apply_sqlite_schema_updates() -> None:
         _run_migration(conn, inspector, "0032_notification_profiles", _migrate_notification_profiles)
         _run_migration(conn, inspector, "0033_scheduled_discovery", _migrate_scheduled_discovery)
         _run_migration(conn, inspector, "0034_lldp_neighbours", _migrate_lldp_neighbours)
+        _run_migration(conn, inspector, "0035_device_os", _migrate_device_os)
 
 
 def _run_migration(conn, inspector, name: str, fn) -> None:
@@ -820,3 +821,9 @@ def _migrate_lldp_neighbours(conn, inspector) -> None:
         ))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lldp_neighbours_id ON lldp_neighbours (id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lldp_neighbours_source_device_id ON lldp_neighbours (source_device_id)"))
+
+
+def _migrate_device_os(conn, inspector) -> None:
+    existing = {col["name"] for col in inspector.get_columns("devices")}
+    if "os" not in existing:
+        conn.execute(text("ALTER TABLE devices ADD COLUMN os VARCHAR(255)"))

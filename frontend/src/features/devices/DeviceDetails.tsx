@@ -5,11 +5,13 @@ import {
   IconFingerprint,
   IconBuildingStore,
   IconDeviceDesktop,
+  IconTerminal2,
   IconPalette,
   IconMap,
   IconRoute,
   IconTag,
   IconNote,
+  IconCalendar,
 } from "@tabler/icons-react";
 import {
   type Device,
@@ -262,6 +264,26 @@ export function DeviceDetails({
             />
           ) : (device.vendor || "Not set")}
         </dd>
+        <dt><span className="details-field-icon"><IconTerminal2 size={12} /></span>OS</dt>
+        <dd
+          className={editHint ? "editable-dd" : undefined}
+          onDoubleClick={editHint ? () => startEdit("os", device.os ?? "") : undefined}
+        >
+          {editingField === "os" ? (
+            <input
+              autoFocus
+              className="details-inline-input"
+              placeholder="e.g. Ubuntu 24.04, Windows Server 2025"
+              value={fieldDraft}
+              onChange={(e) => setFieldDraft(e.target.value)}
+              onBlur={() => { if (!committingRef.current) void commitField({ os: fieldDraft.trim() || null }); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void commitField({ os: fieldDraft.trim() || null });
+                if (e.key === "Escape") cancelEdit();
+              }}
+            />
+          ) : (device.os || "Not set")}
+        </dd>
         <dt><span className="details-field-icon"><IconDeviceDesktop size={12} /></span>Type</dt>
         <dd
           className={editHint ? "editable-dd" : undefined}
@@ -472,6 +494,8 @@ export function DeviceDetails({
             />
           ) : (device.notes || "None")}
         </dd>
+        <dt><span className="details-field-icon"><IconCalendar size={12} /></span>Created</dt>
+        <dd>{new Date(device.created_at).toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</dd>
       </dl>
       {canWrite && (assignedSnmpProfile || onClone || onDelete) && (
         <div className="detail-actions detail-actions--device">

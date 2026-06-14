@@ -39,6 +39,7 @@ export function DeviceForm({
     ip_address: cloneSource ? "" : device?.ip_address ?? "",
     mac_address: cloneSource ? "" : device?.mac_address ?? "",
     vendor: device?.vendor ?? cloneSource?.vendor ?? "",
+    os: device?.os ?? cloneSource?.os ?? "",
     device_type: device?.device_type ?? cloneSource?.device_type ?? "",
     status: device?.status ?? cloneSource?.status ?? "unknown",
     icon: device?.icon ?? cloneSource?.icon ?? deviceTypeIconMap[device?.device_type ?? cloneSource?.device_type ?? ""] ?? "device",
@@ -71,6 +72,7 @@ export function DeviceForm({
       ip_address: form.ip_address.trim() || "",
       mac_address: blankToNull(form.mac_address),
       vendor: blankToNull(form.vendor),
+      os: blankToNull(form.os),
       device_type: selectedDeviceType,
       status: form.status as DeviceStatus,
       icon: (form.icon || "device") as DeviceIcon,
@@ -124,6 +126,10 @@ export function DeviceForm({
                   <input value={form.vendor} onChange={(event) => update("vendor", event.target.value)} />
                 </label>
               </div>
+              <label>
+                OS
+                <input placeholder="e.g. Ubuntu 24.04, Windows Server 2025, Cisco IOS" value={form.os} onChange={(event) => update("os", event.target.value)} />
+              </label>
             </div>
 
             <div className="device-form-section">

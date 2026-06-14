@@ -16,6 +16,7 @@ class DeviceBase(BaseModel):
     ip_address: str | None = Field(default=None, max_length=64)
     mac_address: str | None = Field(default=None, max_length=64)
     vendor: str | None = Field(default=None, max_length=120)
+    os: str | None = Field(default=None, max_length=255)
     device_type: str | None = Field(default=None, max_length=80)
     status: DeviceStatus = DeviceStatus.UNKNOWN
     icon: str = Field(default="device", max_length=120)
@@ -111,6 +112,7 @@ class DeviceUpdate(BaseModel):
     ip_address: str | None = Field(default=None, max_length=64)
     mac_address: str | None = Field(default=None, max_length=64)
     vendor: str | None = Field(default=None, max_length=120)
+    os: str | None = Field(default=None, max_length=255)
     device_type: str | None = Field(default=None, max_length=80)
     status: DeviceStatus | None = None
     icon: str | None = Field(default=None, max_length=40)
