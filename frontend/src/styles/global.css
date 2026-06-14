@@ -10633,7 +10633,8 @@ body.theme-dark .mon-checks-group-label { color: #4a7a96; }
   gap: 2px;
 }
 .heartbeat-bar--sm {
-  flex: 0 0 200px;
+  width: 200px;
+  flex-shrink: 0;
   flex-direction: row;
   justify-content: flex-end;
   gap: 1px;
