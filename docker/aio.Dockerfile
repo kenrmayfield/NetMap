@@ -31,6 +31,7 @@ RUN apt-get update \
        gosu \
        iproute2 \
        iputils-ping \
+       libcap2-bin \
        nginx \
        nmap \
        sudo \
@@ -38,6 +39,7 @@ RUN apt-get update \
        traceroute \
        tzdata \
   && rm -rf /var/lib/apt/lists/* \
+  && setcap cap_net_raw+ep /bin/ping \
   && echo "netmap ALL=(root) NOPASSWD: /usr/bin/nmap" > /etc/sudoers.d/netmap-nmap \
   && chmod 440 /etc/sudoers.d/netmap-nmap
 
