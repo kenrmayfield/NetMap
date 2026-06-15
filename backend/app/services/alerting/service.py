@@ -249,7 +249,7 @@ class AlertMonitorService:
             result = ping_host(PingRequest(host=device.ip_address, count=1, timeout_seconds=1), allow_public_targets=True)
             if result.received > 0:
                 return "online", result.average_ms
-            return "offline", None
+            # ICMP available but no response — fall through to TCP fallback
         except Exception as exc:  # noqa: BLE001
             logger.debug("ICMP monitor failed for %s: %s", device.ip_address, exc)
 
