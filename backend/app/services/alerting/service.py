@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = 300
 HISTORY_RETAIN_DAYS = 30
-LIVE_STATUS_FALLBACK_PORTS = (22, 80, 443, 53)
+LIVE_STATUS_FALLBACK_PORTS = (80, 443, 22, 8080, 53, 8443)
 LIVE_STATUS_FALLBACK_TIMEOUT_SECONDS = 0.5
 MONITOR_STATUS_WORKERS = 12
 
@@ -246,7 +246,7 @@ class AlertMonitorService:
 
     def _probe_device_status(self, device: Device) -> tuple[str, float | None]:
         try:
-            result = ping_host(PingRequest(host=device.ip_address, count=1, timeout_seconds=1), allow_public_targets=True)
+            result = ping_host(PingRequest(host=device.ip_address, count=3, timeout_seconds=3), allow_public_targets=True)
             if result.received > 0:
                 return "online", result.average_ms
             # ICMP available but no response — fall through to TCP fallback

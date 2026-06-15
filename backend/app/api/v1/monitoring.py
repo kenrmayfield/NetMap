@@ -16,6 +16,7 @@ from app.models.device import Device
 from app.models.monitor_history import DeviceMonitorHistory
 from app.models.port_target import DevicePortTarget
 from app.models.site import Site
+from app.models.topology_group import TopologyGroup
 from app.models.user import User
 from app.schemas.monitoring import (
     DeviceAnalysis,
@@ -126,6 +127,7 @@ def _build_device_summaries(
     devices: list[Device],
 ) -> list[DeviceMonitorSummary]:
     site_map = {s.id: (s.display_name or s.name) for s in db.scalars(select(Site)).all()}
+    group_name_map = {g.id: g.name for g in db.scalars(select(TopologyGroup)).all()}
     now = datetime.now(timezone.utc)
     since_24h = now - timedelta(hours=24)
     since_7d = now - timedelta(days=7)
@@ -210,7 +212,7 @@ def _build_device_summaries(
                 hostname=device.hostname,
                 ip_address=device.ip_address,
                 status=device.monitor_status or "unknown",
-                topology_group=device.topology_group or None,
+                topology_group=device.topology_group or group_name_map.get(device.topology_group_id) or None,
                 site_id=device.site_id,
                 site_name=site_map.get(device.site_id) if device.site_id else None,
                 vlan_id=device.vlan_id or None,
