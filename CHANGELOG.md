@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.3.0] - 2026-06-16
+
+### Changed
+- **IP address placeholders** across discovery, device forms, VLAN/IPAM fields, and network tools now use generic `192.168.1.x` examples.
+- **Inter font bundled:** The UI now ships Inter (weights 400–600) via `@fontsource/inter` instead of relying on a system-installed font. Typography is consistent across browsers and containers; body text uses weight 400 with antialiasing for a lighter feel.
+- **Consistent modals and controls:** Shared modal shell, buttons, search inputs, and status pills are now used across IPAM, Inventory, Monitoring, Topology, Locations, Admin, and related panels — dialogs, toolbars, and forms behave the same way throughout the app.
+- **Primary action buttons** use a deeper teal instead of the brighter accent, so `+ Device` and other primary CTAs are less visually loud.
+- **Discovery scan SNMP** is now a dedicated toggle button with a labelled configuration panel, instead of a checkbox buried in the form. Post-scan actions separate "Import selected" (primary) from "Update existing" (secondary).
+- **Sidebar:** Overview uses a home icon (Monitoring keeps the activity chart icon). The NetMap brand navigates to Overview; collapse is a compact icon on the right.
+- **Announcement banner (MOTD)** uses a purple alert style to distinguish it from offline and network-update notices.
+
+### Added
+- **Overview — Recently updated:** Users with write access can add a device or run a network scan from the Recently updated panel header (and empty state).
+- **VLAN filter** in the Monitoring workspace: a dropdown next to the site filter lets you narrow the device list by VLAN ID.
+
+### Fixed
+- **Icon Manager server-pack path** no longer shows the internal `dev/` prefix in the help text.
+- **Search box focus rings** in Inventory, Locations, and Monitoring now align with the outer search container instead of glowing around the inner input only.
+- **Monitoring search** no longer shows a double border from overlapping wrapper and input styles.
+- **Monitoring "Reset columns"** removed — column widths are fixed by default.
+- **Locations "View larger map" link** no longer has a pill background behind the text.
+- **Discovery scan modal actions** no longer sit on a shaded footer bar.
+- **Monitoring search** shows a single outer border (no double-border from wrapper + input).
+- **Topology ribbon toolbar** normalises button, select, and status chip heights; `+ Device` matches other controls.
+- **Inventory MOTD spacing** tightened so the announcement bar sits closer to the stat cards below it.
+- **Inventory table** uses the full panel width on wide (1440p) screens with rebalanced column proportions.
+- **IPAM subnet drilldown tabs** no longer cause a horizontal scrollbar; tabs use an equal-width grid within the modal.
+- **IPAM subnet drilldown address table** no longer inherits the monitoring table’s 1580px minimum width. Columns are equal thirds; IP addresses are left-aligned, Status and Label are centred. Label shows inventory display names (with hostname fallback for registered devices; DHCP entries match inventory by MAC when possible).
+- **Overview favourites row** alignment: uptime, RTT, and star columns line up correctly; RTT hides on narrow viewports without breaking the grid.
+- **Monitoring group dropdown** was missing groups for devices whose group was set via a topology group relationship rather than the denormalised string field. The monitoring API now falls back to the `TopologyGroup` table by FK when the string field is null.
+- **Topology sidebar** open/close no longer recentres or pans the map. Previously `cy.fit()` was being called on sidebar toggle, which would jump the viewport. The sidebar now only calls `cy.resize()` (resize without refit).
+- **Topology zone backgrounds** no longer flicker every 30 seconds during live status polling. The zone style effect had `filteredGraph` in its dependency array; since the style values don't depend on device data, it was needlessly re-applying styles on every status poll.
+- **Monitoring probe reliability:** ICMP failure messages are now logged at `WARNING` level (visible at the default `info` log level) instead of `DEBUG`, making it easier to diagnose devices showing offline. The probe also logs raw ping output when ICMP succeeds but returns zero replies. The `received` field is now handled null-safely so a parse failure no longer silently shadows the underlying error.
+- **ICMP monitoring now works correctly:** `apt-get install iputils-ping` runs `setcap cap_net_raw+ep /bin/ping || true` in its postinstall script — the `|| true` meant `setcap` silently failed in Docker's build sandbox (which doesn't grant `CAP_SETFCAP`), leaving the `ping` binary with no file capability. The Dockerfile now installs `libcap2-bin` and runs `setcap cap_net_raw+ep /bin/ping` explicitly in the same `RUN` layer, which runs with the full build-time capability set and correctly stamps the capability on the binary. Previously only TCP fallback was ever used for monitoring probes.
+
+---
+
 ## [1.2.9] - 2026-06-15
 
 ### Fixed
